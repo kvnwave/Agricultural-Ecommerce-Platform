@@ -1,3 +1,45 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #000000;
+  --color-fg: #F6F8F9;
+
+  --font-sans: "Inter", sans-serif;
+
+  --text-h1: 48px;
+  --text-h2: 40px;
+  --text-h3: 33px;
+  --text-h4: 28px;
+  --text-h5: 23px;
+  --text-h6: 19px;
+  --text-body: 16px;
+  --text-small: 13px;
+}
+
+/* Table responsiveness */
+@media (max-width: 768px) {
+  .data-table th,
+  .data-table td {
+    padding: 8px;
+    font-size: 12px;
+  }
+}
+
+/* Base responsive styles */
+@media (max-width: 640px) {
+  body {
+    padding: 10px;
+  }
+
+  h1 {
+    font-size: 1.8rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  .container {
+    padding: 15px;
+  }
+}
