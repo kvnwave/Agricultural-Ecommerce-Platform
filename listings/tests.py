@@ -4,6 +4,7 @@ import tempfile
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -152,6 +153,28 @@ class ListingModelTests(TestCase):
 
         self.assertEqual(listing.sold_out_at, sold_out_at)
 
+    def test_status_change_is_ignored_when_update_fields_excludes_status(self):
+        listing = self.make_listing()
+        listing.save()
+        listing.status = Listing.Status.SOLD_OUT
+
+        listing.save(update_fields=["title"])
+        listing.refresh_from_db()
+
+        self.assertEqual(listing.status, Listing.Status.ACTIVE)
+        self.assertIsNone(listing.sold_out_at)
+
+    def test_empty_update_fields_does_not_write_sold_out_timestamp(self):
+        listing = self.make_listing()
+        listing.save()
+        listing.status = Listing.Status.SOLD_OUT
+
+        listing.save(update_fields=[])
+        listing.refresh_from_db()
+
+        self.assertEqual(listing.status, Listing.Status.ACTIVE)
+        self.assertIsNone(listing.sold_out_at)
+
     def test_newest_listing_is_first(self):
         older = self.make_listing(title="Older")
         older.save()
@@ -232,6 +255,38 @@ class ListingImageTests(TestCase):
 
         self.assertEqual(self.listing.cover_image, first)
 
+    def test_deleting_image_removes_file_after_commit(self):
+        image = self.upload()
+        storage = image.image.storage
+        name = image.image.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            image.delete()
+
+        self.assertFalse(storage.exists(name))
+
+    def test_deleting_listing_removes_cascaded_image_files(self):
+        image = self.upload()
+        storage = image.image.storage
+        name = image.image.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.listing.delete()
+
+        self.assertFalse(storage.exists(name))
+
+    def test_rollback_keeps_image_file(self):
+        image = self.upload()
+        storage = image.image.storage
+        name = image.image.name
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                image.delete()
+                raise RuntimeError("change rejected")
+
+        self.assertTrue(storage.exists(name))
+
 
 @override_settings(
     STORAGES={
@@ -282,6 +337,14 @@ class ListingImageStorageTests(TestCase):
         self.assertContains(response, image.image.url)
 
 
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+)
 class ListingFormTests(TestCase):
     def setUp(self):
         self.farmer = create_farmer()
@@ -433,6 +496,81 @@ class ListingFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("images", form.errors)
+
+    def test_failed_photo_upload_rolls_back_new_listing(self):
+        written_files = []
+        real_save = ListingImage.save
+
+        def fail_after_first_upload(instance, *args, **kwargs):
+            if written_files:
+                raise RuntimeError("storage failed")
+            result = real_save(instance, *args, **kwargs)
+            written_files.append(instance.image.name)
+            return result
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={
+                "images": [
+                    uploaded_image("first.png"),
+                    uploaded_image("second.png"),
+                ]
+            },
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        with mock.patch.object(
+            ListingImage,
+            "save",
+            autospec=True,
+            side_effect=fail_after_first_upload,
+        ):
+            with self.assertRaises(RuntimeError):
+                form.save()
+
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
+        self.assertEqual(ListingImage.objects.count(), 0)
+        self.assertEqual(len(written_files), 1)
+        self.assertFalse(storages["default"].exists(written_files[0]))
+
+    def test_failed_upload_restores_removed_photo_and_listing(self):
+        listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Existing",
+            description="Already has a photo.",
+            price=Decimal("50.00"),
+        )
+        existing = ListingImage.objects.create(
+            listing=listing,
+            image=uploaded_image("existing.png"),
+        )
+        existing_name = existing.image.name
+
+        form = ListingForm(
+            data=self.valid_data(
+                title="Renamed",
+                remove_images=[existing.pk],
+            ),
+            files={"images": [uploaded_image("replacement.png")]},
+            instance=listing,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+        with mock.patch.object(
+            ListingImage,
+            "save",
+            autospec=True,
+            side_effect=RuntimeError("storage failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                form.save()
+
+        listing.refresh_from_db()
+        self.assertEqual(listing.title, "Existing")
+        self.assertTrue(ListingImage.objects.filter(pk=existing.pk).exists())
+        self.assertTrue(storages["default"].exists(existing_name))
 
 
 @override_settings(
