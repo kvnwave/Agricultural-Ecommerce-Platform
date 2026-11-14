@@ -16,6 +16,8 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
+from config.storage import supabase_storage_options
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -86,6 +88,8 @@ AUTHENTICATION_BACKENDS = [
 # Users remember their email, not the internal username Django requires.
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+# Adds the buyer/farmer choice before allauth creates the account.
+ACCOUNT_FORMS = {'signup': 'accounts.forms.SignupForm'}
 # Email is the account identifier, so an unverified address cannot log in.
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 # Temporary landing page until the marketplace dashboard exists.
@@ -95,6 +99,9 @@ LOGIN_REDIRECT_URL = '/listings/'
 # creating a duplicate user for the same address.
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+# New social accounts must choose a role; the start endpoint stores it first.
+SOCIALACCOUNT_AUTO_SIGNUP = False
+SOCIALACCOUNT_FORMS = {'signup': 'accounts.forms.SocialSignupForm'}
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
@@ -209,19 +216,25 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
+# Public buckets get permanent object URLs; private buckets use signed URLs.
+SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
+    "SUPABASE_S3_QUERYSTRING_AUTH", ""
+).lower() in {"1", "true", "yes"}
 
 if SUPABASE_S3_ENDPOINT:
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": {
-                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
-                "endpoint_url": SUPABASE_S3_ENDPOINT,
-                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
-                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
-                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                "file_overwrite": False,
-            },
+            "OPTIONS": supabase_storage_options(
+                endpoint=SUPABASE_S3_ENDPOINT,
+                bucket=SUPABASE_BUCKET,
+                access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                custom_domain=os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", ""),
+                querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
+            ),
         },
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
