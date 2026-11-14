@@ -3,14 +3,19 @@ from functools import wraps
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count
+from django.core.paginator import Paginator
+from django.db.models import Count, Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Profile
 
 from .forms import ListingForm
-from .models import Listing
+from .models import Category, Listing
+
+PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
+LISTINGS_PER_PAGE = 24
 
 
 def farmer_required(view_func):
@@ -27,7 +32,82 @@ def farmer_required(view_func):
 
 
 def listings_view(request):
-    return render(request, "listings/listings.html")
+    """Public marketplace with portable ORM search and basic filters."""
+
+    listings = (
+        Listing.objects.filter(status__in=PUBLIC_LISTING_STATUSES)
+        .select_related("category", "farmer")
+        .prefetch_related("images")
+        .annotate(likes_total=Count("likes"))
+        .order_by("-created_at")
+    )
+
+    query = (request.GET.get("q") or "").strip()
+    if query:
+        listings = listings.filter(
+            Q(title__icontains=query)
+            | Q(description__icontains=query)
+            | Q(category__name__icontains=query)
+            | Q(farmer__first_name__icontains=query)
+            | Q(farmer__last_name__icontains=query)
+            | Q(farmer__username__icontains=query)
+        )
+
+    category_slug = (request.GET.get("category") or "").strip()
+    if category_slug:
+        listings = listings.filter(category__slug=category_slug)
+
+    condition = (request.GET.get("condition") or "").strip()
+    if condition in Listing.Condition.values:
+        listings = listings.filter(condition=condition)
+
+    pricing = (request.GET.get("pricing") or "").strip()
+    if pricing == "free":
+        listings = listings.filter(is_free=True)
+    elif pricing == "paid":
+        listings = listings.filter(is_free=False)
+
+    page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
+        request.GET.get("page")
+    )
+
+    return render(
+        request,
+        "listings/listings.html",
+        {
+            "page_obj": page_obj,
+            "listings": page_obj.object_list,
+            "categories": Category.objects.all(),
+            "conditions": Listing.Condition.choices,
+            "pricing_options": (("free", "Free"), ("paid", "Paid")),
+            "query": query,
+            "selected_category": category_slug,
+            "selected_condition": condition,
+            "selected_pricing": pricing,
+        },
+    )
+
+
+def listing_detail(request, public_id):
+    listing = get_object_or_404(
+        Listing.objects.select_related("category", "farmer")
+        .prefetch_related("images")
+        .annotate(likes_total=Count("likes")),
+        public_id=public_id,
+    )
+
+    is_owner = (
+        request.user.is_authenticated and listing.farmer_id == request.user.id
+    )
+    if listing.status not in PUBLIC_LISTING_STATUSES and not is_owner:
+        raise Http404("Listing is not available.")
+
+    return render(
+        request,
+        "listings/listing_detail.html",
+        {"listing": listing, "is_owner": is_owner},
+    )
+
 
 
 @farmer_required
