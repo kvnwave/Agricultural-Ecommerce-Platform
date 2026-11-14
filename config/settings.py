@@ -10,22 +10,30 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv'
+SECRET_KEY = os.getenv(
+    "SECRET_KEY",
+    'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 # Application definition
 
@@ -81,7 +89,9 @@ WSGI_APPLICATION = 'config.wsgi.application'
 import dj_database_url
 
 DATABASES = {
-    "default": dj_database_url.config(env="DATABASE_URL", conn_max_age=0, ssl_require=True)
+    "default": dj_database_url.config(
+        env="DATABASE_URL", conn_max_age=0, ssl_require=not DEBUG
+    )
 }
 DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  
 
