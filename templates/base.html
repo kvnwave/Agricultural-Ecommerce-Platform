@@ -1,4 +1,14 @@
 {% load static %}
+{% comment %}
+  Global context available to every page:
+  - `user` is `request.user`. Check `user.is_authenticated` before reading
+    `user.profile`, because anonymous requests have no profile row.
+  - `messages` carries allauth feedback such as "verification email sent".
+
+  Profile fields for signed-in pages: `user.profile.role`,
+  `user.profile.phone`, `user.profile.location`,
+  `user.profile.email_notifications`, and `user.profile.sms_notifications`.
+{% endcomment %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -8,7 +18,15 @@
   <link href="{% static 'css_output/output.css' %}" rel="stylesheet">
   {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-bg">
+<body class="bg-bg text-fg">
+  {% if messages %}
+    <div class="mx-auto max-w-3xl px-4 pt-4" role="status">
+      {% for message in messages %}
+        <p class="mb-2 rounded border border-fg/20 px-3 py-2">{{ message }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
   {% block content %}{% endblock %}
+  {% block extra_body %}{% endblock %}
 </body>
 </html>
