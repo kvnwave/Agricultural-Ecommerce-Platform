@@ -22,7 +22,6 @@ from django.conf.urls.static import static
 from accounts import views as accounts_views
 from analytics import views as analytics_views
 from chat import views as chat_views
-from listings import views as listings_views
 from notifications import views as notifications_views
 
 urlpatterns = [
@@ -38,7 +37,7 @@ urlpatterns = [
     path('accounts/', include('allauth.urls')),
     path('analytics/', analytics_views.analytics_view, name='analytics'),
     path('chat/', chat_views.chat_view, name='chat'),
-    path('listings/', listings_views.listings_view, name='listings'),
+    path('listings/', include('listings.urls')),
     path('notifications/', notifications_views.notifications_view, name='notifications'),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(
     settings.MEDIA_URL, document_root=settings.MEDIA_ROOT

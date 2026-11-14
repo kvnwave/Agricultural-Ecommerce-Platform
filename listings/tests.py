@@ -16,6 +16,7 @@ from PIL import Image
 
 from accounts.models import Profile, User
 
+from .forms import ListingForm
 from .models import Category, Listing, ListingImage, ListingLike
 
 
@@ -23,6 +24,14 @@ def image_bytes():
     buffer = io.BytesIO()
     Image.new("RGB", (20, 20), "green").save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def uploaded_image(filename="photo.png"):
+    return SimpleUploadedFile(
+        filename,
+        image_bytes(),
+        content_type="image/png",
+    )
 
 
 def create_farmer(username="farmer"):
@@ -185,6 +194,353 @@ class ListingImageTests(TestCase):
         first = self.upload(filename="first.png", position=0)
 
         self.assertEqual(list(self.listing.images.all()), [first, second])
+
+
+class ListingFormTests(TestCase):
+    def setUp(self):
+        self.farmer = create_farmer()
+        self.category = Category.objects.create(name="Test Produce")
+        self.media_root = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+
+    def valid_data(self, **overrides):
+        data = {
+            "title": "Fresh tomatoes",
+            "category": self.category.pk,
+            "condition": Listing.Condition.FRESH,
+            "description": "Picked this morning.",
+            "price": "120.00",
+            "unit": Listing.Unit.KILOGRAM,
+            "stock_quantity": "25",
+            "status": Listing.Status.ACTIVE,
+        }
+        data.update(overrides)
+        return data
+
+    def test_create_requires_at_least_one_photo(self):
+        form = ListingForm(data=self.valid_data())
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("images", form.errors)
+
+    def test_create_accepts_one_photo(self):
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_create_rejects_more_than_five_photos(self):
+        form = ListingForm(
+            data=self.valid_data(),
+            files={
+                "images": [
+                    uploaded_image(f"photo-{index}.png") for index in range(6)
+                ]
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("images", form.errors)
+
+    def test_free_listing_needs_no_price(self):
+        form = ListingForm(
+            data=self.valid_data(is_free="on", price=""),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_free_listing_rejects_price(self):
+        form = ListingForm(
+            data=self.valid_data(is_free="on"),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("price", form.errors)
+
+    def test_meetup_requires_location(self):
+        form = ListingForm(
+            data=self.valid_data(meetup="on", meetup_location=""),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("meetup_location", form.errors)
+
+    def test_edit_accepts_existing_photo_without_new_upload(self):
+        listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Existing",
+            description="Already has a photo.",
+            price=Decimal("50.00"),
+        )
+        ListingImage.objects.create(listing=listing, image=uploaded_image())
+
+        form = ListingForm(
+            data=self.valid_data(title="Existing"),
+            instance=listing,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_edit_rejects_removing_the_last_photo(self):
+        listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Existing",
+            description="Already has a photo.",
+            price=Decimal("50.00"),
+        )
+        image = ListingImage.objects.create(
+            listing=listing,
+            image=uploaded_image(),
+        )
+
+        form = ListingForm(
+            data=self.valid_data(
+                title="Existing",
+                remove_images=[image.pk],
+            ),
+            instance=listing,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("images", form.errors)
+
+    def test_edit_counts_existing_and_new_photos_together(self):
+        listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Existing",
+            description="Already has a photo.",
+            price=Decimal("50.00"),
+        )
+        ListingImage.objects.create(listing=listing, image=uploaded_image())
+
+        form = ListingForm(
+            data=self.valid_data(title="Existing"),
+            files={
+                "images": [
+                    uploaded_image(f"new-{index}.png") for index in range(5)
+                ]
+            },
+            instance=listing,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("images", form.errors)
+
+
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+)
+class ListingViewTests(TestCase):
+    def setUp(self):
+        self.farmer = create_farmer()
+        self.other_farmer = create_farmer("other-farmer")
+        self.buyer = User.objects.create_user(
+            "listing-buyer",
+            email="listing-buyer@example.com",
+            password="temporary-pass-1",
+        )
+        self.category = Category.objects.create(name="View Produce")
+        self.media_root = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+
+        self.listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Existing tomatoes",
+            description="Already listed.",
+            price=Decimal("100.00"),
+        )
+        self.add_image(self.listing)
+
+    def add_image(self, listing, filename="existing.png"):
+        return ListingImage.objects.create(
+            listing=listing,
+            image=uploaded_image(filename),
+            position=listing.images.count(),
+        )
+
+    def valid_data(self, **overrides):
+        data = {
+            "title": "Fresh tomatoes",
+            "category": self.category.pk,
+            "condition": Listing.Condition.FRESH,
+            "description": "Picked this morning.",
+            "price": "120.00",
+            "unit": Listing.Unit.KILOGRAM,
+            "stock_quantity": "25",
+            "status": Listing.Status.ACTIVE,
+        }
+        data.update(overrides)
+        return data
+
+    def test_create_requires_login(self):
+        response = self.client.get(reverse("listing_create"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('account_login')}?next={reverse('listing_create')}",
+        )
+
+    def test_buyer_cannot_create_listing(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("listing_create"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_farmer_can_create_listing_with_photo(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            {
+                **self.valid_data(),
+                "images": uploaded_image("cover.png"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("my_listings"))
+        listing = Listing.objects.get(title="Fresh tomatoes")
+        self.assertEqual(listing.farmer, self.farmer)
+        self.assertEqual(listing.images.count(), 1)
+
+    def test_create_rejects_listing_without_photo(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            self.valid_data(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add at least one photo.")
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
+
+    def test_owner_can_update_listing(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_update", args=[self.listing.public_id]),
+            self.valid_data(title="Updated tomatoes"),
+        )
+
+        self.assertRedirects(response, reverse("my_listings"))
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.title, "Updated tomatoes")
+        self.assertEqual(self.listing.images.count(), 1)
+
+    def test_non_owner_cannot_update_listing(self):
+        self.client.force_login(self.other_farmer)
+
+        response = self.client.get(
+            reverse("listing_update", args=[self.listing.public_id])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_buyer_cannot_update_listing(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(
+            reverse("listing_update", args=[self.listing.public_id])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_delete_listing(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(
+            reverse("listing_delete", args=[self.listing.public_id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            reverse("listing_delete", args=[self.listing.public_id])
+        )
+
+        self.assertRedirects(response, reverse("my_listings"))
+        self.assertFalse(Listing.objects.filter(pk=self.listing.pk).exists())
+
+    def test_non_owner_cannot_delete_listing(self):
+        self.client.force_login(self.other_farmer)
+
+        response = self.client.post(
+            reverse("listing_delete", args=[self.listing.public_id])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_my_listings_only_shows_own(self):
+        other_listing = Listing.objects.create(
+            farmer=self.other_farmer,
+            category=self.category,
+            title="Someone else's tomatoes",
+            description="Not mine.",
+            price=Decimal("90.00"),
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(reverse("my_listings"))
+
+        self.assertContains(response, self.listing.title)
+        self.assertNotContains(response, other_listing.title)
+
+    def test_buyer_cannot_open_my_listings(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("my_listings"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_remove_one_photo(self):
+        second = self.add_image(self.listing, "second.png")
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_update", args=[self.listing.public_id]),
+            {
+                **self.valid_data(title=self.listing.title),
+                "remove_images": [second.pk],
+            },
+        )
+
+        self.assertRedirects(response, reverse("my_listings"))
+        self.assertEqual(self.listing.images.count(), 1)
+
+    def test_owner_can_add_a_photo(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_update", args=[self.listing.public_id]),
+            {
+                **self.valid_data(title=self.listing.title),
+                "images": uploaded_image("added.png"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("my_listings"))
+        self.assertEqual(self.listing.images.count(), 2)
 
 
 class ListingAdminTests(TestCase):
