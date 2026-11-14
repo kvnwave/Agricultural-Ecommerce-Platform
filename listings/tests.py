@@ -5,7 +5,9 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import storages
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
@@ -229,6 +231,55 @@ class ListingImageTests(TestCase):
         first = self.upload(filename="first.png", position=0)
 
         self.assertEqual(self.listing.cover_image, first)
+
+
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+)
+class ListingImageStorageTests(TestCase):
+    """Listings must work without local disk, as on Supabase Storage."""
+
+    def setUp(self):
+        self.farmer = create_farmer("storage-farmer")
+        self.category = Category.objects.create(name="Storage Produce")
+        self.listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Stored tomatoes",
+            description="Fresh from the farm.",
+            price=Decimal("120.00"),
+        )
+
+    def test_image_round_trips_through_default_storage(self):
+        image = ListingImage.objects.create(
+            listing=self.listing,
+            image=uploaded_image("stored.png"),
+        )
+        storage = storages["default"]
+
+        self.assertEqual(type(storage).__name__, "InMemoryStorage")
+        self.assertTrue(storage.exists(image.image.name))
+        self.assertTrue(image.image.url.startswith(settings.MEDIA_URL))
+
+        with storage.open(image.image.name, "rb") as stored:
+            self.assertEqual(stored.read(), image_bytes())
+
+    def test_detail_page_renders_storage_url(self):
+        image = ListingImage.objects.create(
+            listing=self.listing,
+            image=uploaded_image("stored.png"),
+        )
+
+        response = self.client.get(
+            reverse("listing_detail", args=[self.listing.public_id])
+        )
+
+        self.assertContains(response, image.image.url)
 
 
 class ListingFormTests(TestCase):
