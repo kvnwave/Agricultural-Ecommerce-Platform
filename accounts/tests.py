@@ -2,19 +2,23 @@ import io
 import shutil
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from allauth.account.models import EmailAddress
-from allauth.socialaccount.models import SocialAccount
+from allauth.core import context as allauth_context
+from allauth.socialaccount.forms import SignupForm as AllauthSocialSignupForm
+from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from PIL import Image
 
+from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
 from .models import Profile, User
 
 
@@ -69,10 +73,18 @@ class AuthPageTests(TestCase):
 class SignupFlowTests(TestCase):
     password = "temporary-pass-1"
 
+    def test_signup_page_offers_both_account_types(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertContains(response, "Account type")
+        self.assertContains(response, "Buyer")
+        self.assertContains(response, "Farmer")
+
     def test_signup_creates_user_profile_and_verification_email(self):
         response = self.client.post(
             reverse("account_signup"),
             {
+                "role": Profile.Role.BUYER,
                 "email": "new@example.com",
                 "password1": self.password,
                 "password2": self.password,
@@ -99,6 +111,7 @@ class SignupFlowTests(TestCase):
         response = self.client.post(
             reverse("account_signup"),
             {
+                "role": Profile.Role.BUYER,
                 "email": "taken@example.com",
                 "password1": self.password,
                 "password2": self.password,
@@ -113,6 +126,122 @@ class SignupFlowTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(User.objects.filter(email="taken@example.com").count(), 1)
+
+    def test_signup_creates_farmer_account(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.FARMER,
+                "email": "farmer@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("account_email_verification_sent"),
+            fetch_redirect_response=False,
+        )
+        user = User.objects.get(email="farmer@example.com")
+        self.assertEqual(user.profile.role, Profile.Role.FARMER)
+
+    def test_signup_requires_an_account_type(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "email": "no-role@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required.")
+        self.assertFalse(User.objects.filter(email="no-role@example.com").exists())
+
+
+class SocialSignupRoleTests(TestCase):
+    def sociallogin(self):
+        return SocialLogin(user=User(email="social@example.com"))
+
+    def test_start_stores_role_and_redirects_to_provider(self):
+        response = self.client.get(
+            reverse(
+                "social_signup_start",
+                kwargs={"provider": "google", "role": Profile.Role.FARMER},
+            )
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("google_login"),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(
+            self.client.session[SOCIAL_SIGNUP_ROLE_SESSION_KEY],
+            Profile.Role.FARMER,
+        )
+
+    def test_start_rejects_unknown_role_or_provider(self):
+        cases = (
+            {"provider": "google", "role": "admin"},
+            {"provider": "not-a-provider", "role": Profile.Role.FARMER},
+        )
+
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                response = self.client.get(
+                    reverse("social_signup_start", kwargs=kwargs)
+                )
+                self.assertEqual(response.status_code, 404)
+
+    def test_social_signup_view_uses_custom_form(self):
+        from allauth.socialaccount.views import SignupView
+
+        self.assertIs(SignupView().get_form_class(), SocialSignupForm)
+
+    def test_social_form_has_no_default_role(self):
+        form = SocialSignupForm(sociallogin=self.sociallogin())
+
+        self.assertTrue(form.fields["role"].required)
+        self.assertIsNone(form.fields["role"].initial)
+
+    def test_social_form_prefills_role_from_session(self):
+        request = RequestFactory().get("/")
+        request.session = {
+            SOCIAL_SIGNUP_ROLE_SESSION_KEY: Profile.Role.FARMER,
+        }
+
+        with allauth_context.request_context(request):
+            form = SocialSignupForm(sociallogin=self.sociallogin())
+
+        self.assertEqual(form.fields["role"].initial, Profile.Role.FARMER)
+
+    def test_social_form_saves_role_and_clears_session(self):
+        user = User.objects.create_user(
+            "social",
+            email="social@example.com",
+            password="temporary-pass-1",
+        )
+        request = RequestFactory().get("/")
+        request.session = {
+            SOCIAL_SIGNUP_ROLE_SESSION_KEY: Profile.Role.FARMER,
+        }
+        form = SocialSignupForm(sociallogin=self.sociallogin())
+        form.cleaned_data = {"role": Profile.Role.FARMER}
+
+        with mock.patch.object(
+            AllauthSocialSignupForm,
+            "save",
+            return_value=user,
+        ) as base_save:
+            result = form.save(request)
+
+        self.assertIs(result, user)
+        self.assertEqual(user.profile.role, Profile.Role.FARMER)
+        self.assertNotIn(SOCIAL_SIGNUP_ROLE_SESSION_KEY, request.session)
+        base_save.assert_called_once_with(request)
 
 
 class LoginFlowTests(TestCase):
