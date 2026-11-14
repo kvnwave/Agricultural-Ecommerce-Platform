@@ -44,6 +44,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
+
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
 
     'accounts',
     'analytics',
@@ -57,6 +63,45 @@ INSTALLED_APPS = [
 # because Django's admin and permission tooling expect it.
 AUTH_USER_MODEL = 'accounts.User'
 
+# allauth scopes provider apps and email links to a Site, so production must
+# change the default example.com domain to the real deployment host.
+SITE_ID = 1
+
+AUTHENTICATION_BACKENDS = [
+    # Keeps Django admin password login and permission checks working.
+    'django.contrib.auth.backends.ModelBackend',
+    # Adds email-based login and resolves social accounts through allauth.
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# Users remember their email, not the internal username Django requires.
+ACCOUNT_LOGIN_METHODS = {'email'}
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+# Email is the account identifier, so an unverified address cannot log in.
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+# Temporary landing page until the marketplace dashboard exists.
+LOGIN_REDIRECT_URL = '/listings/'
+
+# Google verifies the email, so link it to an existing local account instead of
+# creating a duplicate user for the same address.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+
+# allauth advertises only providers with an app. Leaving Google out until both
+# credentials exist prevents a login button that fails on click.
+SOCIALACCOUNT_PROVIDERS = {}
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    SOCIALACCOUNT_PROVIDERS['google'] = {
+        'APP': {
+            'client_id': GOOGLE_CLIENT_ID,
+            'secret': GOOGLE_CLIENT_SECRET,
+        },
+        'SCOPE': ['profile', 'email'],
+    }
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -65,6 +110,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Enforces allauth's email-verification and social-login flow state.
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
