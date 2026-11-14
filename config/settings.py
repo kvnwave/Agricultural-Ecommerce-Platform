@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -34,6 +35,14 @@ SECRET_KEY = os.getenv(
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+# HTTPS deployments behind a proxy or custom domain need their public origin
+# trusted, otherwise Django rejects form posts as cross-site.
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 # Application definition
 
@@ -137,15 +146,23 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-# settings.py
-import dj_database_url
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Empty values fall back to requiring TLS outside DEBUG.
+DB_SSL_REQUIRE = os.getenv("DB_SSL_REQUIRE") or str(not DEBUG)
+DB_SSL_REQUIRE = DB_SSL_REQUIRE.lower() in {"1", "true", "yes"}
 
 DATABASES = {
     "default": dj_database_url.config(
-        env="DATABASE_URL", conn_max_age=0, ssl_require=not DEBUG
+        env="DATABASE_URL",
+        conn_max_age=0,
+        # SQLite passes OPTIONS straight to sqlite3 and rejects Postgres sslmode.
+        ssl_require=DB_SSL_REQUIRE and not DATABASE_URL.startswith("sqlite"),
     )
 }
-DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  
+# Supabase's transaction pooler cannot keep server-side cursors open between
+# statements, so Django must avoid them.
+DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
