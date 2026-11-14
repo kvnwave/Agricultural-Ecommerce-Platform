@@ -148,6 +148,13 @@ class Listing(models.Model):
             ),
         ]
 
+    @property
+    def cover_image(self):
+        """Return the first photo by position, using the prefetch cache."""
+
+        images = list(self.images.all())
+        return images[0] if images else None
+
     def clean(self):
         super().clean()
 

@@ -195,6 +195,12 @@ class ListingImageTests(TestCase):
 
         self.assertEqual(list(self.listing.images.all()), [first, second])
 
+    def test_cover_image_uses_first_position(self):
+        self.upload(filename="second.png", position=1)
+        first = self.upload(filename="first.png", position=0)
+
+        self.assertEqual(self.listing.cover_image, first)
+
 
 class ListingFormTests(TestCase):
     def setUp(self):
@@ -541,6 +547,210 @@ class ListingViewTests(TestCase):
 
         self.assertRedirects(response, reverse("my_listings"))
         self.assertEqual(self.listing.images.count(), 2)
+
+
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+)
+class ListingBrowseTests(TestCase):
+    def setUp(self):
+        self.farmer = create_farmer("browse-farmer")
+        self.category = Category.objects.create(name="Browse Vegetables")
+        self.other_category = Category.objects.create(name="Browse Fruit")
+        self.media_root = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+
+        self.active = self.make_listing(
+            "Active tomatoes",
+            description="Leafy greens from the farm.",
+            meetup=True,
+            meetup_location="Public market",
+        )
+        self.sold_out = self.make_listing(
+            "Sold out mangoes",
+            category=self.other_category,
+            condition=Listing.Condition.RIPE,
+            price=Decimal("80.00"),
+            status=Listing.Status.SOLD_OUT,
+        )
+        self.free = self.make_listing(
+            "Free lemons",
+            description="A giveaway box.",
+            price=None,
+            is_free=True,
+        )
+        self.draft = self.make_listing(
+            "Draft squash",
+            status=Listing.Status.DRAFT,
+        )
+        self.archived = self.make_listing(
+            "Archived corn",
+            status=Listing.Status.ARCHIVED,
+        )
+
+    def make_listing(self, title, **overrides):
+        data = {
+            "farmer": self.farmer,
+            "category": self.category,
+            "title": title,
+            "description": "Fresh from the farm.",
+            "price": Decimal("100.00"),
+            "stock_quantity": Decimal("10"),
+            "meetup": True,
+            "meetup_location": "Public market",
+        }
+        data.update(overrides)
+        return Listing.objects.create(**data)
+
+    def test_root_redirects_to_listings(self):
+        response = self.client.get("/")
+
+        self.assertRedirects(response, reverse("listings"))
+
+    def test_browse_shows_only_public_statuses(self):
+        response = self.client.get(reverse("listings"))
+
+        self.assertContains(response, self.active.title)
+        self.assertContains(response, self.sold_out.title)
+        self.assertContains(response, self.free.title)
+        self.assertNotContains(response, self.draft.title)
+        self.assertNotContains(response, self.archived.title)
+
+    def test_search_matches_title_description_and_category(self):
+        cases = (
+            ("tomatoes", self.active.title),
+            ("leafy", self.active.title),
+            ("Browse Fruit", self.sold_out.title),
+            ("browse-farmer", self.active.title),
+        )
+
+        for query, expected in cases:
+            with self.subTest(query=query):
+                response = self.client.get(reverse("listings"), {"q": query})
+                self.assertContains(response, expected)
+
+    def test_browse_filters_by_category(self):
+        response = self.client.get(
+            reverse("listings"),
+            {"category": self.other_category.slug},
+        )
+
+        self.assertContains(response, self.sold_out.title)
+        self.assertNotContains(response, self.active.title)
+
+    def test_browse_filters_by_condition(self):
+        response = self.client.get(
+            reverse("listings"),
+            {"condition": Listing.Condition.RIPE},
+        )
+
+        self.assertContains(response, self.sold_out.title)
+        self.assertNotContains(response, self.active.title)
+
+    def test_browse_filters_free_and_paid(self):
+        free_response = self.client.get(
+            reverse("listings"),
+            {"pricing": "free"},
+        )
+        paid_response = self.client.get(
+            reverse("listings"),
+            {"pricing": "paid"},
+        )
+
+        self.assertContains(free_response, self.free.title)
+        self.assertNotContains(free_response, self.active.title)
+        self.assertContains(paid_response, self.active.title)
+        self.assertNotContains(paid_response, self.free.title)
+
+    def test_browse_ignores_unknown_condition(self):
+        response = self.client.get(
+            reverse("listings"),
+            {"condition": "not-a-condition"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.active.title)
+
+    def test_browse_paginates_listings(self):
+        for index in range(25):
+            self.make_listing(f"Bulk listing {index}")
+
+        first_page = self.client.get(reverse("listings"))
+        second_page = self.client.get(reverse("listings"), {"page": 2})
+
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 28)
+        self.assertEqual(len(first_page.context["page_obj"]), 24)
+        self.assertEqual(len(second_page.context["page_obj"]), 4)
+
+    def test_detail_renders_listing(self):
+        response = self.client.get(
+            reverse("listing_detail", args=[self.active.public_id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.active.title)
+        self.assertContains(response, self.active.description)
+        self.assertContains(response, "₱100.00")
+        self.assertContains(response, "Public market")
+        self.assertContains(response, self.farmer.username)
+
+    def test_detail_shows_sold_out_note(self):
+        self.sold_out.status_note = "Back in stock next week."
+        self.sold_out.save(update_fields=["status_note"])
+
+        response = self.client.get(
+            reverse("listing_detail", args=[self.sold_out.public_id])
+        )
+
+        self.assertContains(response, "Sold out")
+        self.assertContains(response, "Back in stock next week.")
+
+    def test_detail_hides_unpublished_listings_from_public(self):
+        for listing in (self.draft, self.archived):
+            with self.subTest(status=listing.status):
+                response = self.client.get(
+                    reverse("listing_detail", args=[listing.public_id])
+                )
+                self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_preview_unpublished_listing(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(
+            reverse("listing_detail", args=[self.draft.public_id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your listing is currently draft.")
+
+    def test_unknown_listing_returns_404(self):
+        response = self.client.get(
+            reverse("listing_detail", args=[uuid.uuid4()])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_detail_uses_storage_url_for_cover(self):
+        image = ListingImage.objects.create(
+            listing=self.active,
+            image=uploaded_image("cover.png"),
+            position=0,
+        )
+
+        response = self.client.get(
+            reverse("listing_detail", args=[self.active.public_id])
+        )
+
+        self.assertContains(response, image.image.url)
+        self.assertTrue(image.image.url.startswith("/media/"))
 
 
 class ListingAdminTests(TestCase):

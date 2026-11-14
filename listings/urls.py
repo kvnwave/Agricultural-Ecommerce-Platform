@@ -7,6 +7,11 @@ urlpatterns = [
     path("mine/", views.my_listings, name="my_listings"),
     path("new/", views.listing_create, name="listing_create"),
     path(
+        "<uuid:public_id>/",
+        views.listing_detail,
+        name="listing_detail",
+    ),
+    path(
         "<uuid:public_id>/edit/",
         views.listing_update,
         name="listing_update",
