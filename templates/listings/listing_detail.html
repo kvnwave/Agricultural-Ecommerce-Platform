@@ -100,9 +100,19 @@
             Seller:
             {{ listing.farmer.get_full_name|default:listing.farmer.username }}
           </p>
-          <p>{{ listing.likes_total }} likes</p>
+          <div class="mt-3">
+            {% if user.is_authenticated %}
+              {% if can_like %}
+                {% include 'listings/_like_button.html' %}
+              {% endif %}
+            {% else %}
+              <a href="{% url 'account_login' %}?next={{ request.path|urlencode }}" class="text-fg/60 underline">
+                Log in to save this listing
+              </a>
+            {% endif %}
+          </div>
           {% if is_owner and listing.status != 'active' %}
-            <p>Your listing is currently {{ listing.get_status_display|lower }}.</p>
+            <p class="mt-3">Your listing is currently {{ listing.get_status_display|lower }}.</p>
           {% endif %}
         </div>
       </section>

@@ -753,6 +753,165 @@ class ListingBrowseTests(TestCase):
         self.assertTrue(image.image.url.startswith("/media/"))
 
 
+class ListingLikeViewTests(TestCase):
+    def setUp(self):
+        self.farmer = create_farmer("like-farmer")
+        self.buyer = User.objects.create_user(
+            "like-buyer",
+            email="like-buyer@example.com",
+            password="temporary-pass-1",
+        )
+        self.other_buyer = User.objects.create_user(
+            "other-like-buyer",
+            email="other-like-buyer@example.com",
+            password="temporary-pass-1",
+        )
+        self.category = Category.objects.create(name="Like Produce")
+        self.listing = self.make_listing("Liked tomatoes")
+        self.other_listing = self.make_listing("Other tomatoes")
+        self.draft = self.make_listing(
+            "Draft tomatoes",
+            status=Listing.Status.DRAFT,
+        )
+
+    def make_listing(self, title, **overrides):
+        data = {
+            "farmer": self.farmer,
+            "category": self.category,
+            "title": title,
+            "description": "Fresh from the farm.",
+            "price": Decimal("100.00"),
+            "stock_quantity": Decimal("10"),
+        }
+        data.update(overrides)
+        return Listing.objects.create(**data)
+
+    def like_url(self, listing):
+        return reverse("listing_like_toggle", args=[listing.public_id])
+
+    def detail_url(self, listing):
+        return reverse("listing_detail", args=[listing.public_id])
+
+    def test_like_toggle_requires_login(self):
+        response = self.client.post(self.like_url(self.listing))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('account_login')}?next={self.like_url(self.listing)}",
+        )
+        self.assertFalse(ListingLike.objects.exists())
+
+    def test_like_toggle_saves_listing(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(self.like_url(self.listing))
+
+        self.assertRedirects(response, self.detail_url(self.listing))
+        self.assertTrue(
+            ListingLike.objects.filter(
+                user=self.buyer,
+                listing=self.listing,
+            ).exists()
+        )
+        detail = self.client.get(self.detail_url(self.listing))
+        self.assertContains(detail, "♥ Saved")
+
+    def test_second_toggle_removes_like(self):
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(self.like_url(self.listing))
+
+        self.assertRedirects(response, self.detail_url(self.listing))
+        self.assertFalse(
+            ListingLike.objects.filter(
+                user=self.buyer,
+                listing=self.listing,
+            ).exists()
+        )
+        detail = self.client.get(self.detail_url(self.listing))
+        self.assertContains(detail, "♡ Save")
+
+    def test_like_toggle_returns_partial_for_htmx(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(
+            self.like_url(self.listing),
+            headers={"HX-Request": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "listings/_like_button.html")
+        self.assertContains(response, "♥ Saved")
+        self.assertTrue(response.context["is_liked"])
+
+    def test_like_toggle_rejects_get(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(self.like_url(self.listing))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertFalse(ListingLike.objects.exists())
+
+    def test_unpublished_listing_cannot_be_liked(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(self.like_url(self.draft))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ListingLike.objects.exists())
+
+    def test_liked_listings_requires_login(self):
+        response = self.client.get(reverse("liked_listings"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('account_login')}?next={reverse('liked_listings')}",
+        )
+
+    def test_liked_listings_shows_only_own_saved_listings(self):
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        ListingLike.objects.create(
+            user=self.other_buyer,
+            listing=self.other_listing,
+        )
+        ListingLike.objects.create(user=self.buyer, listing=self.draft)
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("liked_listings"))
+
+        self.assertContains(response, self.listing.title)
+        self.assertNotContains(response, self.other_listing.title)
+        self.assertNotContains(response, self.draft.title)
+
+    def test_liked_listings_keeps_sold_out_listings(self):
+        sold_out = self.make_listing(
+            "Sold out tomatoes",
+            status=Listing.Status.SOLD_OUT,
+            status_note="Back next week.",
+        )
+        ListingLike.objects.create(user=self.buyer, listing=sold_out)
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("liked_listings"))
+
+        self.assertContains(response, sold_out.title)
+        self.assertContains(response, "Sold out")
+        self.assertContains(response, "Back next week.")
+
+    def test_liked_listings_counts_all_likes(self):
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        ListingLike.objects.create(
+            user=self.other_buyer,
+            listing=self.listing,
+        )
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("liked_listings"))
+
+        self.assertContains(response, "2 likes")
+
+
 class ListingAdminTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser(
