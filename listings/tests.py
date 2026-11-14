@@ -164,6 +164,20 @@ class ListingModelTests(TestCase):
         self.assertEqual(listing.status, Listing.Status.ACTIVE)
         self.assertIsNone(listing.sold_out_at)
 
+    def test_iterator_update_fields_persists_title_without_status_transition(self):
+        listing = self.make_listing()
+        listing.save()
+        listing.title = "Renamed tomatoes"
+        listing.status = Listing.Status.SOLD_OUT
+
+        listing.save(update_fields=iter(["title"]))
+        self.assertIsNone(listing.sold_out_at)
+        listing.refresh_from_db()
+
+        self.assertEqual(listing.title, "Renamed tomatoes")
+        self.assertEqual(listing.status, Listing.Status.ACTIVE)
+        self.assertIsNone(listing.sold_out_at)
+
     def test_empty_update_fields_does_not_write_sold_out_timestamp(self):
         listing = self.make_listing()
         listing.save()
@@ -274,6 +288,35 @@ class ListingImageTests(TestCase):
             self.listing.delete()
 
         self.assertFalse(storage.exists(name))
+
+    def test_failed_file_cleanup_allows_later_cleanup_callbacks(self):
+        first = self.upload(filename="first.png")
+        second = self.upload(filename="second.png")
+        storage = first.image.storage
+        first_name = first.image.name
+        second_name = second.image.name
+        delete = storage.delete
+
+        def delete_with_failure(name):
+            if name == first_name:
+                raise OSError("Storage unavailable")
+            delete(name)
+
+        with mock.patch.object(
+            storage, "delete", side_effect=delete_with_failure
+        ) as mocked_delete:
+            with self.assertLogs("django.test", level="ERROR"):
+                with self.captureOnCommitCallbacks(execute=True):
+                    first.delete()
+                    second.delete()
+
+        self.assertEqual(
+            mocked_delete.call_args_list,
+            [mock.call(first_name), mock.call(second_name)],
+        )
+        self.assertFalse(ListingImage.objects.exists())
+        self.assertTrue(storage.exists(first_name))
+        self.assertFalse(storage.exists(second_name))
 
     def test_rollback_keeps_image_file(self):
         image = self.upload()

@@ -180,12 +180,12 @@ class Listing(models.Model):
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
             update_fields = set(update_fields)
+            kwargs["update_fields"] = update_fields
             # Only the status column can trigger a timestamp transition. Skip
             # both here when the caller is not writing status, including the
             # empty-set no-op.
             if "status" not in update_fields:
                 return super().save(*args, **kwargs)
-            kwargs["update_fields"] = update_fields
 
         entering_sold_out = (
             self.status == self.Status.SOLD_OUT and self.sold_out_at is None
@@ -240,7 +240,7 @@ def delete_listing_image_file(sender, instance, **kwargs):
     if not name:
         return
     storage = instance.image.storage
-    transaction.on_commit(lambda: storage.delete(name))
+    transaction.on_commit(lambda: storage.delete(name), robust=True)
 
 
 class ListingLike(models.Model):
