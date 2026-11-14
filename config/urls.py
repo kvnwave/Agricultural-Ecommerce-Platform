@@ -15,11 +15,10 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
 
-from accounts import views as accounts_views
 from analytics import views as analytics_views
 from chat import views as chat_views
 from listings import views as listings_views
@@ -27,7 +26,8 @@ from notifications import views as notifications_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('accounts/', accounts_views.accounts_view, name='accounts'),
+    # allauth owns login, signup, verification, password reset, and social login.
+    path('accounts/', include('allauth.urls')),
     path('analytics/', analytics_views.analytics_view, name='analytics'),
     path('chat/', chat_views.chat_view, name='chat'),
     path('listings/', listings_views.listings_view, name='listings'),
