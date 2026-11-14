@@ -10,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
 
@@ -184,6 +185,53 @@ class ListingImageTests(TestCase):
         first = self.upload(filename="first.png", position=0)
 
         self.assertEqual(list(self.listing.images.all()), [first, second])
+
+
+class ListingAdminTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser(
+            "admin",
+            email="admin@example.com",
+            password="temporary-pass-1",
+        )
+        self.farmer = create_farmer()
+        self.buyer = User.objects.create_user(
+            "admin-buyer",
+            email="admin-buyer@example.com",
+            password="temporary-pass-1",
+        )
+        self.category = Category.objects.create(name="Admin Produce")
+        self.listing = Listing.objects.create(
+            farmer=self.farmer,
+            category=self.category,
+            title="Admin tomatoes",
+            description="Fresh from the farm.",
+            price=Decimal("120.00"),
+        )
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        self.client.force_login(self.admin)
+
+    def test_admin_changelists_render(self):
+        pages = (
+            reverse("admin:listings_category_changelist"),
+            reverse("admin:listings_listing_changelist"),
+            reverse("admin:listings_listingimage_changelist"),
+            reverse("admin:listings_listinglike_changelist"),
+        )
+
+        for url in pages:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+
+    def test_listing_change_page_renders_images_and_likes(self):
+        response = self.client.get(
+            reverse("admin:listings_listing_change", args=[self.listing.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Admin tomatoes")
+        self.assertContains(response, "Likes")
 
 
 class ListingLikeTests(TestCase):
