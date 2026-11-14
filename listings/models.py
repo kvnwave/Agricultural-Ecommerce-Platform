@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 
@@ -170,6 +171,27 @@ class Listing(models.Model):
             raise ValidationError(
                 {"meetup_location": "Add the meet-up location."}
             )
+
+    def save(self, *args, **kwargs):
+        """Track when a listing becomes sold out for future like alerts."""
+
+        entering_sold_out = (
+            self.status == self.Status.SOLD_OUT and self.sold_out_at is None
+        )
+        leaving_sold_out = (
+            self.status != self.Status.SOLD_OUT and self.sold_out_at is not None
+        )
+
+        if entering_sold_out:
+            self.sold_out_at = timezone.now()
+        elif leaving_sold_out:
+            self.sold_out_at = None
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and (entering_sold_out or leaving_sold_out):
+            kwargs["update_fields"] = set(update_fields) | {"sold_out_at"}
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title
