@@ -121,6 +121,35 @@ class ListingModelTests(TestCase):
         with self.assertRaises(ValidationError):
             self.make_listing(stock_quantity=Decimal("-1")).full_clean()
 
+    def test_marking_sold_out_records_timestamp(self):
+        listing = self.make_listing(status=Listing.Status.SOLD_OUT)
+        listing.save()
+
+        self.assertIsNotNone(listing.sold_out_at)
+
+    def test_relisting_clears_sold_out_timestamp(self):
+        listing = self.make_listing(status=Listing.Status.SOLD_OUT)
+        listing.save()
+        sold_out_at = listing.sold_out_at
+
+        listing.status = Listing.Status.ACTIVE
+        listing.save(update_fields=["status"])
+        listing.refresh_from_db()
+
+        self.assertIsNotNone(sold_out_at)
+        self.assertIsNone(listing.sold_out_at)
+
+    def test_sold_out_timestamp_survives_other_edits(self):
+        listing = self.make_listing(status=Listing.Status.SOLD_OUT)
+        listing.save()
+        sold_out_at = listing.sold_out_at
+
+        listing.title = "Renamed tomatoes"
+        listing.save()
+        listing.refresh_from_db()
+
+        self.assertEqual(listing.sold_out_at, sold_out_at)
+
     def test_newest_listing_is_first(self):
         older = self.make_listing(title="Older")
         older.save()
@@ -278,6 +307,17 @@ class ListingFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("meetup_location", form.errors)
+
+    def test_sold_out_listing_accepts_blank_restock_note(self):
+        form = ListingForm(
+            data=self.valid_data(
+                status=Listing.Status.SOLD_OUT,
+                status_note="",
+            ),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
 
     def test_edit_accepts_existing_photo_without_new_upload(self):
         listing = Listing.objects.create(
@@ -511,6 +551,17 @@ class ListingViewTests(TestCase):
 
         self.assertContains(response, self.listing.title)
         self.assertNotContains(response, other_listing.title)
+
+    def test_my_listings_shows_restock_note(self):
+        self.listing.status = Listing.Status.SOLD_OUT
+        self.listing.status_note = "Back in stock Friday."
+        self.listing.save()
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(reverse("my_listings"))
+
+        self.assertContains(response, "Sold out")
+        self.assertContains(response, "Back in stock Friday.")
 
     def test_buyer_cannot_open_my_listings(self):
         self.client.force_login(self.buyer)
