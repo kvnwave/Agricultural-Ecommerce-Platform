@@ -16,6 +16,8 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
+from config.storage import supabase_storage_options
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -214,19 +216,25 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
+# Public buckets get permanent object URLs; private buckets use signed URLs.
+SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
+    "SUPABASE_S3_QUERYSTRING_AUTH", ""
+).lower() in {"1", "true", "yes"}
 
 if SUPABASE_S3_ENDPOINT:
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": {
-                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
-                "endpoint_url": SUPABASE_S3_ENDPOINT,
-                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
-                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
-                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                "file_overwrite": False,
-            },
+            "OPTIONS": supabase_storage_options(
+                endpoint=SUPABASE_S3_ENDPOINT,
+                bucket=SUPABASE_BUCKET,
+                access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                custom_domain=os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", ""),
+                querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
+            ),
         },
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
