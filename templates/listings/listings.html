@@ -6,9 +6,16 @@
   <main class="mx-auto max-w-6xl px-4 py-8">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-h3 text-fg">Browse produce</h1>
-      <a href="{% url 'my_listings' %}" class="text-sm text-fg/60 underline">
-        Sell produce
-      </a>
+      <div class="flex items-center gap-4 text-sm">
+        {% if user.is_authenticated %}
+          <a href="{% url 'liked_listings' %}" class="text-fg/60 underline">
+            Saved listings
+          </a>
+        {% endif %}
+        <a href="{% url 'my_listings' %}" class="text-fg/60 underline">
+          Sell produce
+        </a>
+      </div>
     </div>
 
     <form method="get" class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -72,62 +79,7 @@
     {% if listings %}
       <ul class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {% for listing in listings %}
-          <li class="overflow-hidden rounded border border-fg/20">
-            <a href="{% url 'listing_detail' listing.public_id %}" class="block">
-              {% with cover=listing.cover_image %}
-                {% if cover %}
-                  <img
-                    src="{{ cover.image.url }}"
-                    alt="{{ cover.alt_text|default:listing.title }}"
-                    class="h-48 w-full object-cover"
-                  >
-                {% else %}
-                  <div class="flex h-48 items-center justify-center bg-fg/5 text-sm text-fg/50">
-                    No photo yet
-                  </div>
-                {% endif %}
-              {% endwith %}
-            </a>
-
-            <div class="space-y-2 p-4">
-              <div class="flex items-start justify-between gap-3">
-                <h2 class="text-h5 text-fg">
-                  <a href="{% url 'listing_detail' listing.public_id %}">{{ listing.title }}</a>
-                </h2>
-                {% if listing.status == 'sold_out' %}
-                  <span class="rounded bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
-                    Sold out
-                  </span>
-                {% endif %}
-              </div>
-
-              <p class="text-sm text-fg/60">
-                {{ listing.category.name }} · {{ listing.get_condition_display }}
-              </p>
-
-              <p class="text-lg font-medium text-fg">
-                {% if listing.is_free %}
-                  Free
-                {% else %}
-                  ₱{{ listing.price|floatformat:2 }} / {{ listing.get_unit_display }}
-                {% endif %}
-              </p>
-
-              <p class="text-sm text-fg/60">
-                Stock {{ listing.stock_quantity|floatformat:"-2" }} {{ listing.get_unit_display }}
-                {% if listing.bulk_order %}· Bulk orders welcome{% endif %}
-              </p>
-
-              {% if listing.status == 'sold_out' and listing.status_note %}
-                <p class="text-sm text-fg/70">{{ listing.status_note }}</p>
-              {% endif %}
-
-              <p class="text-xs text-fg/50">
-                {{ listing.likes_total }} likes ·
-                {{ listing.farmer.get_full_name|default:listing.farmer.username }}
-              </p>
-            </div>
-          </li>
+          {% include 'listings/_listing_card.html' %}
         {% endfor %}
       </ul>
 

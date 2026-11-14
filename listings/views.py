@@ -4,15 +4,16 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Profile
 
 from .forms import ListingForm
-from .models import Category, Listing
+from .models import Category, Listing, ListingLike
 
 PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
 LISTINGS_PER_PAGE = 24
@@ -102,10 +103,85 @@ def listing_detail(request, public_id):
     if listing.status not in PUBLIC_LISTING_STATUSES and not is_owner:
         raise Http404("Listing is not available.")
 
+    is_liked = (
+        request.user.is_authenticated
+        and ListingLike.objects.filter(
+            user=request.user,
+            listing=listing,
+        ).exists()
+    )
+
     return render(
         request,
         "listings/listing_detail.html",
-        {"listing": listing, "is_owner": is_owner},
+        {
+            "listing": listing,
+            "is_owner": is_owner,
+            "can_like": listing.status in PUBLIC_LISTING_STATUSES,
+            "is_liked": is_liked,
+        },
+    )
+
+
+@login_required
+@require_POST
+def listing_like_toggle(request, public_id):
+    """Save or remove a listing for the signed-in user."""
+
+    listing = get_object_or_404(
+        Listing,
+        public_id=public_id,
+        status__in=PUBLIC_LISTING_STATUSES,
+    )
+    like, created = ListingLike.objects.get_or_create(
+        user=request.user,
+        listing=listing,
+    )
+    if not created:
+        like.delete()
+
+    listing.likes_total = listing.likes.count()
+
+    if request.headers.get("HX-Request") == "true":
+        return render(
+            request,
+            "listings/_like_button.html",
+            {"listing": listing, "is_liked": created},
+        )
+
+    return redirect("listing_detail", public_id=listing.public_id)
+
+
+@login_required
+def liked_listings(request):
+    """Listings the signed-in user saved, including sold-out ones."""
+
+    listings = (
+        Listing.objects.filter(
+            likes__user=request.user,
+            status__in=PUBLIC_LISTING_STATUSES,
+        )
+        .select_related("category", "farmer")
+        .prefetch_related("images")
+        .annotate(
+            likes_total=Coalesce(
+                Subquery(
+                    ListingLike.objects.filter(listing=OuterRef("pk"))
+                    .values("listing")
+                    .annotate(total=Count("pk"))
+                    .values("total"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            )
+        )
+        .order_by("-likes__created_at")
+    )
+
+    return render(
+        request,
+        "listings/liked_listings.html",
+        {"listings": listings},
     )
 
 
