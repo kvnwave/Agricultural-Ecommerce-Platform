@@ -52,6 +52,11 @@ INSTALLED_APPS = [
     'notifications',
 ]
 
+# Django cannot change the user model after auth tables exist, so this must be
+# set before the first migrate. allauth authenticates by email; username stays
+# because Django's admin and permission tooling expect it.
+AUTH_USER_MODEL = 'accounts.User'
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
