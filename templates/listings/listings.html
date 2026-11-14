@@ -1,7 +1,115 @@
 {% extends 'base.html' %}
 
-{% block title %}Listings{% endblock %}
+{% block title %}Browse produce{% endblock %}
 
 {% block content %}
-  <h1 class="text-fg">Listings</h1>
+  <main class="mx-auto max-w-6xl px-4 py-8">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <h1 class="text-h3 text-fg">Browse produce</h1>
+      <div class="flex items-center gap-4 text-sm">
+        {% if user.is_authenticated %}
+          <a href="{% url 'liked_listings' %}" class="text-fg/60 underline">
+            Saved listings
+          </a>
+        {% endif %}
+        <a href="{% url 'my_listings' %}" class="text-fg/60 underline">
+          Sell produce
+        </a>
+      </div>
+    </div>
+
+    <form method="get" class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <label class="text-sm text-fg">
+        Search
+        <input
+          type="search"
+          name="q"
+          value="{{ query }}"
+          placeholder="Produce, description, or farmer"
+          class="mt-1 w-full rounded border border-fg/20 px-3 py-2"
+        >
+      </label>
+
+      <label class="text-sm text-fg">
+        Category
+        <select name="category" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+          <option value="">All categories</option>
+          {% for category in categories %}
+            <option value="{{ category.slug }}" {% if category.slug == selected_category %}selected{% endif %}>
+              {{ category.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="text-sm text-fg">
+        Condition
+        <select name="condition" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+          <option value="">Any condition</option>
+          {% for value, label in conditions %}
+            <option value="{{ value }}" {% if value == selected_condition %}selected{% endif %}>
+              {{ label }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="text-sm text-fg">
+        Price
+        <select name="pricing" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+          <option value="">Free and paid</option>
+          {% for value, label in pricing_options %}
+            <option value="{{ value }}" {% if value == selected_pricing %}selected{% endif %}>
+              {{ label }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div class="flex items-end gap-3 sm:col-span-2 lg:col-span-4">
+        <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+          Filter listings
+        </button>
+        <a href="{% url 'listings' %}" class="text-sm text-fg/60 underline">
+          Clear filters
+        </a>
+      </div>
+    </form>
+
+    {% if listings %}
+      <ul class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {% for listing in listings %}
+          {% include 'listings/_listing_card.html' %}
+        {% endfor %}
+      </ul>
+
+      {% if page_obj.paginator.num_pages > 1 %}
+        <nav class="mt-8 flex items-center justify-between text-sm" aria-label="Listing pages">
+          {% if page_obj.has_previous %}
+            <a href="{% querystring page=page_obj.previous_page_number %}" class="underline">
+              Previous
+            </a>
+          {% else %}
+            <span></span>
+          {% endif %}
+
+          <span class="text-fg/60">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+          </span>
+
+          {% if page_obj.has_next %}
+            <a href="{% querystring page=page_obj.next_page_number %}" class="underline">
+              Next
+            </a>
+          {% else %}
+            <span></span>
+          {% endif %}
+        </nav>
+      {% endif %}
+    {% else %}
+      <p class="mt-8 text-fg/60">
+        No listings match these filters yet.
+      </p>
+    {% endif %}
+  </main>
 {% endblock %}
