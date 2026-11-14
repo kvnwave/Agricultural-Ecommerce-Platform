@@ -19,6 +19,7 @@ from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
 
+from accounts import views as accounts_views
 from analytics import views as analytics_views
 from chat import views as chat_views
 from listings import views as listings_views
@@ -26,10 +27,13 @@ from notifications import views as notifications_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('accounts/', accounts_views.profile_view, name='profile'),
     # allauth owns login, signup, verification, password reset, and social login.
     path('accounts/', include('allauth.urls')),
     path('analytics/', analytics_views.analytics_view, name='analytics'),
     path('chat/', chat_views.chat_view, name='chat'),
     path('listings/', listings_views.listings_view, name='listings'),
     path('notifications/', notifications_views.notifications_view, name='notifications'),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(
+    settings.MEDIA_URL, document_root=settings.MEDIA_ROOT
+)

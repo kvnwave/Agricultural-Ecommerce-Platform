@@ -202,6 +202,32 @@ STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Media
+# Local development keeps uploads on disk; Supabase Storage takes over when
+# its S3 endpoint is configured, so the app server stays disposable.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+
+if SUPABASE_S3_ENDPOINT:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
+                "endpoint_url": SUPABASE_S3_ENDPOINT,
+                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                "file_overwrite": False,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
