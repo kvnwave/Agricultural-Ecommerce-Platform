@@ -6,7 +6,8 @@ A Django-based marketplace for agricultural products. Farmers upload produce lis
 
 - Email and Google login, with Google or uploaded profile photos
 - Farmer listings with photos, price, unit, quantity, and location
-- Browse and search listings
+- Browse, search, and filter listings; save liked listings
+- Sold-out status with an optional restock note
 - Real-time buyer/farmer chat, one thread per buyer per listing
 - Individual analytics (listing views, inquiries, price vs market)
 - Site-wide analytics (average asking price per produce type over time)
@@ -129,6 +130,10 @@ SUPABASE_S3_ACCESS_KEY=
 SUPABASE_S3_SECRET_KEY=
 SUPABASE_S3_REGION=ap-southeast-1
 SUPABASE_BUCKET=listings
+# Leave empty for a public bucket. Set True for expiring signed URLs.
+SUPABASE_S3_QUERYSTRING_AUTH=
+# Optional; defaults to <project>.supabase.co/storage/v1/object/public/<bucket>
+SUPABASE_S3_CUSTOM_DOMAIN=
 ```
 
 | Variable | Purpose |
@@ -145,6 +150,8 @@ SUPABASE_BUCKET=listings
 | `EMAIL_*`, `DEFAULT_FROM_EMAIL` | Email provider SMTP credentials. |
 | `SMS_API_KEY` | SMS provider key. |
 | `SUPABASE_S3_*`, `SUPABASE_S3_REGION`, `SUPABASE_BUCKET` | Media storage credentials and bucket region (Supabase dashboard, Storage, S3 connection). |
+| `SUPABASE_S3_QUERYSTRING_AUTH` | Empty/False for a public bucket; `True` for expiring signed URLs on a private bucket. |
+| `SUPABASE_S3_CUSTOM_DOMAIN` | Optional public URL base. Defaults to the Supabase `object/public/<bucket>` path. |
 
 Local SQLite works for early development:
 
@@ -265,11 +272,14 @@ AUTHENTICATION_BACKENDS = [
 
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_FORMS = {"signup": "accounts.forms.SignupForm"}
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 LOGIN_REDIRECT_URL = "/listings/"
 
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+SOCIALACCOUNT_AUTO_SIGNUP = False
+SOCIALACCOUNT_FORMS = {"signup": "accounts.forms.SocialSignupForm"}
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -285,7 +295,8 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     }
 ```
 
-- Signup collects email and password only; every new account starts as a buyer. Farmers are promoted through the profile/admin later.
+- Signup collects email and password plus the account type (buyer or farmer). Only farmer accounts can create listings; buyers can browse and save listings.
+- Social signup never defaults to buyer. Provider buttons should link through `/accounts/social/<provider>/start/<role>/` so the role is chosen before the OAuth handshake. Direct provider URLs fall back to a social signup form that still requires a role.
 - Verification is mandatory, so an unverified address cannot log in. Locally, allauth prints the verification email to the console; production needs SMTP configured.
 - The Google block only exists when both credentials are set. Otherwise the login page shows no Google button, avoiding a dead link.
 - `SOCIALACCOUNT_EMAIL_AUTHENTICATION*` links a Google login to an existing local account with the same verified email. Google verifies email ownership, so this does not create a duplicate account.
@@ -295,6 +306,11 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 ```python
 path("accounts/", accounts_views.profile_view, name="profile"),
+path(
+    "accounts/social/<str:provider>/start/<str:role>/",
+    accounts_views.social_signup_start,
+    name="social_signup_start",
+),
 path("accounts/", include("allauth.urls")),
 ```
 
@@ -381,23 +397,30 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 ```
 
-Production switches to Supabase Storage when the S3 endpoint is present:
+Production switches to Supabase Storage when the S3 endpoint is present. `config/storage.py` builds the options so public buckets get permanent Supabase URLs instead of authenticated S3 API URLs:
 
 ```python
+from config.storage import supabase_storage_options
+
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
+SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
+    "SUPABASE_S3_QUERYSTRING_AUTH", ""
+).lower() in {"1", "true", "yes"}
 
 if SUPABASE_S3_ENDPOINT:
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": {
-                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
-                "endpoint_url": SUPABASE_S3_ENDPOINT,
-                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
-                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
-                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                "file_overwrite": False,
-            },
+            "OPTIONS": supabase_storage_options(
+                endpoint=SUPABASE_S3_ENDPOINT,
+                bucket=SUPABASE_BUCKET,
+                access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                custom_domain=os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", ""),
+                querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
+            ),
         },
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
@@ -405,10 +428,21 @@ if SUPABASE_S3_ENDPOINT:
     }
 ```
 
-- Set `SUPABASE_S3_REGION` to the project's real region; uploads fail when it does not match.
+- Set `SUPABASE_S3_REGION` to the region shown in **Storage → S3 connection**; a different region causes `SignatureDoesNotMatch`.
+- S3 access keys live in **Project Settings → Storage → S3 Access Keys**. They are not the `anon` or `service_role` API keys.
+- Supabase requires path-style URLs and SigV4 signing; the helper sets both.
+- For a **public** bucket (the default), `SUPABASE_S3_QUERYSTRING_AUTH` stays empty. The helper sets `custom_domain` to `<project>.supabase.co/storage/v1/object/public/<bucket>`, which is the only URL that serves public objects without a signature.
+- For a **private** bucket, set `SUPABASE_S3_QUERYSTRING_AUTH=True`. Django then returns expiring signed URLs and does not use the public custom domain.
 - `file_overwrite=False` plus per-user, random filenames keeps one upload from replacing another.
-- Profile photos upload at `/accounts/` with a 5 MB limit. An uploaded photo takes precedence; Google users keep their Google `picture` until they upload one.
-- Listing photos will use the same storage when that feature is added.
+- Profile photos upload at `/accounts/` with a 5 MB limit; listing photos allow up to 5 files per listing, 5 MB each. Both use the default storage and render through `.url`, never `.path`, so the same code works locally and on Supabase.
+- Local tests exercise listing uploads with `InMemoryStorage` to prove no local disk is required.
+
+Supabase bucket checklist:
+
+1. Create the bucket named by `SUPABASE_BUCKET` (default `listings`).
+2. Set it to public for permanent CDN URLs, or private with signed URLs.
+3. For public buckets, add a read policy on `storage.objects` for the bucket if your project does not already allow public reads.
+4. Add `SUPABASE_S3_ENDPOINT`, access key, secret, and region to the environment, then restart the app process so settings reload.
 
 ## Database Setup
 
@@ -421,22 +455,17 @@ python manage.py createsuperuser
 
 `migrate` builds the tables. `createsuperuser` creates an account for the admin site at `/admin/`.
 
-Enable trigram search in the first `listings` migration:
-
-```python
-from django.contrib.postgres.operations import TrigramExtension
-
-class Migration(migrations.Migration):
-    operations = [TrigramExtension(), ...]
-```
+Listings currently use portable ORM search (`icontains` across title, description, category, and farmer names). The local development database is SQLite, so the planned Postgres `pg_trgm` indexes and full-text search are deferred until Supabase Postgres is the active database. When that happens, add a `TrigramExtension` migration and GIN indexes rather than changing the view contract.
 
 ## Data Model
 
 | Model | Fields |
 | --- | --- |
 | `Profile` | One-to-one with User. Role (farmer/buyer), phone, location, notification preferences, avatar. |
-| `Category` | Produce type (rice, tomato, and so on). |
-| `Listing` | Farmer FK, category FK, price per unit, unit (kg/sack), quantity, location, status, timestamps. |
+| `Category` | Produce type (rice, tomato, and so on), unique name and slug. |
+| `Listing` | Public UUID, farmer FK, category FK, title, condition, description, price/is_free, unit, stock, bulk order, deal methods, status, status note, sold-out timestamp, timestamps. |
+| `ListingImage` | Listing FK, image, ordered position, alt text. Up to 5 per listing; first position is the cover. |
+| `ListingLike` | User FK, listing FK, created timestamp. Unique on `(user, listing)`. |
 | `Conversation` | Listing FK, buyer FK, farmer FK. Unique on `(listing, buyer)`. |
 | `Message` | Conversation FK, sender FK, body, `created_at`, `read_at`. |
 | `Notification` | User FK, type, payload, channel, `sent_at`. |
@@ -446,6 +475,45 @@ class Migration(migrations.Migration):
 Indexes: `Message(conversation, created_at)` and `Listing(category, status, created_at)`.
 
 Normalize units (kg vs sack) at write time. Averages across mixed units are meaningless.
+
+## Listings
+
+Public routes (all listings use `public_id`, a UUID, instead of the database PK):
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Redirects to `/listings/`. |
+| `/listings/` | Browse active and sold-out listings. |
+| `/listings/<uuid>/` | Listing detail. Draft and archived listings are owner-only. |
+| `/listings/liked/` | Signed-in user's saved listings. |
+
+Browse filters are ordinary query parameters, so they work without JavaScript:
+
+- `q` searches title, description, category name, and farmer name.
+- `category` matches a category slug.
+- `condition` matches one of the five condition values.
+- `pricing=free` or `pricing=paid` uses the `is_free` flag.
+- `page` paginates at 24 listings per page.
+
+Seller routes require a farmer account:
+
+| Route | Purpose |
+| --- | --- |
+| `/listings/mine/` | Seller dashboard with stock, status, likes, and restock note. |
+| `/listings/new/` | Create a listing with 1–5 photos. |
+| `/listings/<uuid>/edit/` | Edit an owned listing, add photos, or remove photos. |
+| `/listings/<uuid>/delete/` | GET shows confirmation; POST deletes. |
+
+Rules enforced by the model and form:
+
+- Paid listings require a price; free listings must have no price.
+- A meet-up deal method requires a location.
+- Stock cannot be negative.
+- Photos are image files of at most 5 MB each; the first by position is the cover.
+- Marking a listing sold out records `sold_out_at`; relisting clears it. `status_note` is optional and appears to buyers, for example “Back in stock Friday.”
+- Likes survive sold-out changes so a future notification task can use `ListingLike` plus `sold_out_at`.
+
+Likes use `POST /listings/<uuid>/like/` to toggle. The view redirects back to the detail page, or returns the `listings/_like_button.html` partial when HTMX sends `HX-Request: true`.
 
 ## Chat Architecture
 
@@ -577,6 +645,7 @@ Rules:
 ```bash
 python manage.py test
 python manage.py test accounts   # auth, profile, avatar, and signup flows
+python manage.py test listings   # models, admin, seller CRUD, browse, likes
 ```
 
 Django's built-in test runner. For WebSocket consumers, override the channel layer with the in-memory backend so tests do not need Redis:
@@ -589,9 +658,9 @@ Django's built-in test runner. For WebSocket consumers, override the channel lay
 
 Each step depends on the previous one.
 
-1. Auth (allauth, custom user, profile)
-2. Listings CRUD
-3. Browse and search
+1. Auth (allauth, custom user, profile) — complete
+2. Listings CRUD — complete
+3. Browse, search, likes, and sold-out status — complete
 4. Chat
 5. Notifications
 6. Analytics
@@ -608,6 +677,8 @@ Pre-deployment checklist:
 - `DB_SSL_REQUIRE=True`
 - `REDIS_URL` pointing to a managed Redis instance
 - `SUPABASE_S3_*` and `SUPABASE_S3_REGION` configured so uploads persist
+- Supabase bucket created, with public-read access or `SUPABASE_S3_QUERYSTRING_AUTH=True`
+- `SUPABASE_S3_CUSTOM_DOMAIN` set if the bucket is served from a custom domain
 - Site domain changed from `example.com` to the production domain
 - Supabase Data API disabled, or `anon` / `authenticated` grants revoked
 - `python manage.py collectstatic` executed
@@ -641,5 +712,8 @@ Static files in production are served by [WhiteNoise](https://whitenoise.readthe
 | Google button missing from login | One or both Google credentials are missing | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then restart Django. |
 | CSRF verification fails on a deployed form | The public origin is not trusted | Add it to `CSRF_TRUSTED_ORIGINS`, including `https://`. |
 | Uploaded avatars disappear after redeploy | Files are on the disposable app filesystem | Configure `SUPABASE_S3_*` so Django uses Supabase Storage. |
+| Listing photos return `AccessDenied` / `Missing signature` | `SUPABASE_S3_ENDPOINT` points at the authenticated S3 API instead of the public object URL | Keep `SUPABASE_S3_QUERYSTRING_AUTH` empty for a public bucket so `custom_domain` is used, or set it to `True` for a private bucket. |
+| `SignatureDoesNotMatch` on upload | Wrong S3 access key, endpoint, or region | Use the S3 access keys and region from **Storage → S3 connection**, then restart the app. |
+| Social buttons create buyers even after choosing farmer | Buttons still point directly at `/accounts/google/login/` | Link through `/accounts/social/google/start/farmer/` (or the buyer variant) instead. |
 | WebSocket connects then closes immediately | Authorization check failed or origin rejected | Check the user is a conversation participant and the host is in `ALLOWED_HOSTS`. |
 | `redirect_uri_mismatch` on Google login | Callback URL not registered | Add the exact `/accounts/google/login/callback/` URL in Google Cloud Console. |
