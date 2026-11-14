@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -27,9 +27,13 @@ from notifications import views as notifications_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('accounts/', accounts_views.accounts_view, name='accounts'),
+    path('accounts/', accounts_views.profile_view, name='profile'),
+    # allauth owns login, signup, verification, password reset, and social login.
+    path('accounts/', include('allauth.urls')),
     path('analytics/', analytics_views.analytics_view, name='analytics'),
     path('chat/', chat_views.chat_view, name='chat'),
     path('listings/', listings_views.listings_view, name='listings'),
     path('notifications/', notifications_views.notifications_view, name='notifications'),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(
+    settings.MEDIA_URL, document_root=settings.MEDIA_ROOT
+)

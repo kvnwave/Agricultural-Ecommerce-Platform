@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -35,6 +36,14 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
+# HTTPS deployments behind a proxy or custom domain need their public origin
+# trusted, otherwise Django rejects form posts as cross-site.
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -44,6 +53,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
+
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
 
     'accounts',
     'analytics',
@@ -51,6 +66,50 @@ INSTALLED_APPS = [
     'listings',
     'notifications',
 ]
+
+# Django cannot change the user model after auth tables exist, so this must be
+# set before the first migrate. allauth authenticates by email; username stays
+# because Django's admin and permission tooling expect it.
+AUTH_USER_MODEL = 'accounts.User'
+
+# allauth scopes provider apps and email links to a Site, so production must
+# change the default example.com domain to the real deployment host.
+SITE_ID = 1
+
+AUTHENTICATION_BACKENDS = [
+    # Keeps Django admin password login and permission checks working.
+    'django.contrib.auth.backends.ModelBackend',
+    # Adds email-based login and resolves social accounts through allauth.
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# Users remember their email, not the internal username Django requires.
+ACCOUNT_LOGIN_METHODS = {'email'}
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+# Email is the account identifier, so an unverified address cannot log in.
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+# Temporary landing page until the marketplace dashboard exists.
+LOGIN_REDIRECT_URL = '/listings/'
+
+# Google verifies the email, so link it to an existing local account instead of
+# creating a duplicate user for the same address.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+
+# allauth advertises only providers with an app. Leaving Google out until both
+# credentials exist prevents a login button that fails on click.
+SOCIALACCOUNT_PROVIDERS = {}
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    SOCIALACCOUNT_PROVIDERS['google'] = {
+        'APP': {
+            'client_id': GOOGLE_CLIENT_ID,
+            'secret': GOOGLE_CLIENT_SECRET,
+        },
+        'SCOPE': ['profile', 'email'],
+    }
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -60,6 +119,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Enforces allauth's email-verification and social-login flow state.
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -85,15 +146,23 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-# settings.py
-import dj_database_url
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Empty values fall back to requiring TLS outside DEBUG.
+DB_SSL_REQUIRE = os.getenv("DB_SSL_REQUIRE") or str(not DEBUG)
+DB_SSL_REQUIRE = DB_SSL_REQUIRE.lower() in {"1", "true", "yes"}
 
 DATABASES = {
     "default": dj_database_url.config(
-        env="DATABASE_URL", conn_max_age=0, ssl_require=not DEBUG
+        env="DATABASE_URL",
+        conn_max_age=0,
+        # SQLite passes OPTIONS straight to sqlite3 and rejects Postgres sslmode.
+        ssl_require=DB_SSL_REQUIRE and not DATABASE_URL.startswith("sqlite"),
     )
 }
-DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  
+# Supabase's transaction pooler cannot keep server-side cursors open between
+# statements, so Django must avoid them.
+DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
@@ -132,6 +201,32 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Media
+# Local development keeps uploads on disk; Supabase Storage takes over when
+# its S3 endpoint is configured, so the app server stays disposable.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+
+if SUPABASE_S3_ENDPOINT:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
+                "endpoint_url": SUPABASE_S3_ENDPOINT,
+                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                "file_overwrite": False,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration

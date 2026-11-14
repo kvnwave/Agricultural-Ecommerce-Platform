@@ -1,0 +1,29 @@
+{% comment %}
+  Displays a user's profile photo.
+
+  Pass a user explicitly when rendering someone else's profile:
+  `{% include "partials/avatar.html" with avatar_user=profile_user %}`.
+  Without it, the partial falls back to the current `user`.
+
+  `avatar_user.profile.avatar_url` prefers an uploaded photo, then the `picture`
+  URL allauth stores on a linked Google account. The initial covers email-only
+  users who have not uploaded anything yet.
+{% endcomment %}
+{% with avatar_user=avatar_user|default:user %}
+  {% if avatar_user.profile.avatar_url %}
+    <img
+      src="{{ avatar_user.profile.avatar_url }}"
+      alt="{{ avatar_user.get_full_name|default:avatar_user.email }}"
+      class="h-10 w-10 rounded-full object-cover"
+      referrerpolicy="no-referrer"
+    >
+  {% else %}
+    <span
+      role="img"
+      aria-label="Avatar for {{ avatar_user.get_full_name|default:avatar_user.email }}"
+      class="flex h-10 w-10 items-center justify-center rounded-full bg-fg/10 text-fg"
+    >
+      {{ avatar_user.get_full_name|default:avatar_user.email|first|upper }}
+    </span>
+  {% endif %}
+{% endwith %}

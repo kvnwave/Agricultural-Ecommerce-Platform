@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% comment %}
+  Shared shell for signed-in account management (email, password, sessions).
+
+  These pages can read the profile fields added in `accounts.Profile`:
+  - `user.profile.role` / `user.profile.get_role_display`
+  - `user.profile.phone`, `user.profile.location`
+  - `user.profile.email_notifications`, `user.profile.sms_notifications`
+
+  `user.email` and `user.get_full_name` come from the custom user model.
+  `user.username` is internal only; marketplace pages should not display it.
+{% endcomment %}
+
+{% block title %}{% block head_title %}{% endblock head_title %}{% endblock title %}
+{% block content %}{% endblock content %}

@@ -4,7 +4,7 @@ A Django-based marketplace for agricultural products. Farmers upload produce lis
 
 ## Features
 
-- Email and Google login
+- Email and Google login, with Google or uploaded profile photos
 - Farmer listings with photos, price, unit, quantity, and location
 - Browse and search listings
 - Real-time buyer/farmer chat, one thread per buyer per listing
@@ -98,10 +98,14 @@ Configuration is read from environment variables. Create a `.env` file in the pr
 SECRET_KEY=
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
+# Public HTTPS origin(s), comma-separated, e.g. https://market.example.com
+CSRF_TRUSTED_ORIGINS=
 
 # Supabase Postgres
 DATABASE_URL=postgres://USER:PASSWORD@HOST:6543/postgres   # transaction pooler, runtime
 DIRECT_URL=postgres://USER:PASSWORD@HOST:5432/postgres     # session pooler or direct, migrations
+# Set True for Supabase; empty defaults to requiring TLS outside DEBUG.
+DB_SSL_REQUIRE=
 
 # Redis (Channels + Celery)
 REDIS_URL=redis://127.0.0.1:6379/0
@@ -123,6 +127,7 @@ SMS_API_KEY=
 SUPABASE_S3_ENDPOINT=https://<project-ref>.supabase.co/storage/v1/s3
 SUPABASE_S3_ACCESS_KEY=
 SUPABASE_S3_SECRET_KEY=
+SUPABASE_S3_REGION=ap-southeast-1
 SUPABASE_BUCKET=listings
 ```
 
@@ -131,19 +136,25 @@ SUPABASE_BUCKET=listings
 | `SECRET_KEY` | Django cryptographic signing key. |
 | `DEBUG` | `True` for development, `False` for production. |
 | `ALLOWED_HOSTS` | Comma-separated hostnames Django will serve. |
+| `CSRF_TRUSTED_ORIGINS` | Comma-separated public HTTPS origins allowed to submit forms. |
 | `DATABASE_URL` | Runtime database connection (Supabase transaction pooler, port 6543). |
 | `DIRECT_URL` | Connection used for `migrate` (Supabase session pooler or direct, port 5432). |
+| `DB_SSL_REQUIRE` | Force TLS for remote databases. Empty defaults to `not DEBUG`. |
 | `REDIS_URL` | Channel layer and Celery broker. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials. Both are required before the button appears. |
 | `EMAIL_*`, `DEFAULT_FROM_EMAIL` | Email provider SMTP credentials. |
 | `SMS_API_KEY` | SMS provider key. |
-| `SUPABASE_S3_*`, `SUPABASE_BUCKET` | Media storage credentials (Supabase dashboard, Storage, S3 connection). |
+| `SUPABASE_S3_*`, `SUPABASE_S3_REGION`, `SUPABASE_BUCKET` | Media storage credentials and bucket region (Supabase dashboard, Storage, S3 connection). |
 
 Local SQLite works for early development:
 
 ```env
 DATABASE_URL=sqlite:///db.sqlite3
+DIRECT_URL=sqlite:///db.sqlite3
+DB_SSL_REQUIRE=
 ```
+
+SQLite ignores `DB_SSL_REQUIRE`; TLS is only applied to remote database URLs.
 
 If `DATABASE_URL` is missing, the app logs `No DATABASE_URL environment variable set, and so no databases setup` and database commands fail. Set it before running `migrate`.
 
@@ -172,7 +183,6 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 
 INSTALLED_APPS = [
-    "daphne",                      # must be first: makes runserver ASGI-aware
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -180,7 +190,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",        # required by allauth
-    "django.contrib.postgres",     # trigram search
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
@@ -190,7 +199,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -204,23 +212,50 @@ AUTH_USER_MODEL = "accounts.User"   # define before the first migration
 SITE_ID = 1
 ```
 
-Custom user model: define `class User(AbstractUser): pass` in `accounts/models.py` before the first `migrate`. Changing `AUTH_USER_MODEL` after tables exist is painful.
+The custom user model must exist before the first `migrate`. Changing `AUTH_USER_MODEL` after auth tables exist is painful. `accounts.User` keeps Django's username for admin compatibility; email is the unique login identifier.
 
 ### Database (Supabase)
 
 ```python
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Empty values fall back to requiring TLS outside DEBUG.
+DB_SSL_REQUIRE = os.getenv("DB_SSL_REQUIRE") or str(not DEBUG)
+DB_SSL_REQUIRE = DB_SSL_REQUIRE.lower() in {"1", "true", "yes"}
+
 DATABASES = {
-    "default": dj_database_url.config(env="DATABASE_URL", conn_max_age=0, ssl_require=not DEBUG)
+    "default": dj_database_url.config(
+        env="DATABASE_URL",
+        conn_max_age=0,
+        # SQLite rejects Postgres sslmode; only remote databases use TLS.
+        ssl_require=DB_SSL_REQUIRE and not DATABASE_URL.startswith("sqlite"),
+    )
 }
-DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  # required for the transaction pooler
+DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 ```
 
 - Transaction pooler (port 6543) does not support server-side cursors. Runtime uses it.
-- Migrations use `DIRECT_URL`.
+- Migrations use `DIRECT_URL`, because DDL and long transactions should not go through the transaction pooler.
 - `conn_max_age=0` because the pooler already manages connections.
-- If `DATABASE_URL` is SQLite, `ssl_require` must stay off. The `not DEBUG` guard covers local development, so use SQLite only with `DEBUG=True`.
+- `DB_SSL_REQUIRE` defaults to `not DEBUG`; set it explicitly for Supabase.
+- Local SQLite stays unaffected because the TLS option is skipped for `sqlite://` URLs.
+
+#### Supabase Data API security
+
+Django connects straight to Postgres, so this project does not use Supabase's Data API. Supabase projects can still grant `anon` and `authenticated` roles access to new tables in `public`, which would expose `accounts_user` — including emails and password hashes — through the project's anon key.
+
+Choose one:
+
+- Disable the Data API in **Project Settings → API**, or
+- Revoke the default `anon` / `authenticated` grants on `public`, and enable RLS with no policies for Django-owned tables.
+
+Django's direct connection runs as the table owner and is not subject to RLS. RLS protects the Data API; it does not replace Django authentication.
+
+Never put the Supabase `service_role` key in Django. The Postgres connection string and Storage S3 credentials are all the app needs.
 
 ### Auth (django-allauth)
+
+Django and django-allauth are the single identity system. Supabase Auth is not used. `accounts.User` extends `AbstractUser`: username stays for Django admin compatibility, while email is unique and is the login identifier. A `post_save` signal creates `Profile` for email signups, Google signups, admin-created users, and tests.
 
 ```python
 AUTHENTICATION_BACKENDS = [
@@ -231,31 +266,49 @@ AUTHENTICATION_BACKENDS = [
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/listings/"
 
-SOCIALACCOUNT_PROVIDERS = {
-    "google": {
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+SOCIALACCOUNT_PROVIDERS = {}
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    SOCIALACCOUNT_PROVIDERS["google"] = {
         "APP": {
-            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-            "secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "client_id": GOOGLE_CLIENT_ID,
+            "secret": GOOGLE_CLIENT_SECRET,
         },
         "SCOPE": ["profile", "email"],
     }
-}
 ```
+
+- Signup collects email and password only; every new account starts as a buyer. Farmers are promoted through the profile/admin later.
+- Verification is mandatory, so an unverified address cannot log in. Locally, allauth prints the verification email to the console; production needs SMTP configured.
+- The Google block only exists when both credentials are set. Otherwise the login page shows no Google button, avoiding a dead link.
+- `SOCIALACCOUNT_EMAIL_AUTHENTICATION*` links a Google login to an existing local account with the same verified email. Google verifies email ownership, so this does not create a duplicate account.
+- Change the default `example.com` Site row to the real domain in **Admin → Sites**; allauth uses it in verification emails and provider setup.
 
 `config/urls.py`:
 
 ```python
+path("accounts/", accounts_views.profile_view, name="profile"),
 path("accounts/", include("allauth.urls")),
 ```
 
-Google Cloud Console, OAuth client, authorized redirect URIs:
+`/accounts/` is the profile page and photo upload. allauth owns `/accounts/login/`, `/accounts/signup/`, verification, password reset, and social login because the profile route matches only the exact root path.
+
+Google Cloud Console → OAuth client (Web application), authorized redirect URIs:
 
 ```
+http://localhost:8000/accounts/google/login/callback/
 http://127.0.0.1:8000/accounts/google/login/callback/
 https://<production-domain>/accounts/google/login/callback/
 ```
+
+Use the scopes `openid`, `email`, and `profile`. Do not enable Google under Supabase Authentication; the OAuth callback goes to Django, not Supabase.
 
 ### Channels and Redis
 
@@ -319,25 +372,43 @@ __all__ = ("celery_app",)
 CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 ```
 
-### Media (Supabase Storage)
+### Media (avatars and listing photos)
+
+Local development stores uploads under `media/` and Django serves them only while `DEBUG=True`:
 
 ```python
-STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.s3.S3Storage",
-        "OPTIONS": {
-            "bucket_name": os.getenv("SUPABASE_BUCKET"),
-            "endpoint_url": os.getenv("SUPABASE_S3_ENDPOINT"),
-            "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY"),
-            "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY"),
-            "region_name": "ap-southeast-1",   # match your Supabase project region
-        },
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 ```
+
+Production switches to Supabase Storage when the S3 endpoint is present:
+
+```python
+SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
+
+if SUPABASE_S3_ENDPOINT:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": os.getenv("SUPABASE_BUCKET", "listings"),
+                "endpoint_url": SUPABASE_S3_ENDPOINT,
+                "access_key": os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+                "secret_key": os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+                "region_name": os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+                "file_overwrite": False,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+```
+
+- Set `SUPABASE_S3_REGION` to the project's real region; uploads fail when it does not match.
+- `file_overwrite=False` plus per-user, random filenames keeps one upload from replacing another.
+- Profile photos upload at `/accounts/` with a 5 MB limit. An uploaded photo takes precedence; Google users keep their Google `picture` until they upload one.
+- Listing photos will use the same storage when that feature is added.
 
 ## Database Setup
 
@@ -363,7 +434,7 @@ class Migration(migrations.Migration):
 
 | Model | Fields |
 | --- | --- |
-| `Profile` | One-to-one with User. Role (farmer/buyer), phone, location, notification preferences. |
+| `Profile` | One-to-one with User. Role (farmer/buyer), phone, location, notification preferences, avatar. |
 | `Category` | Produce type (rice, tomato, and so on). |
 | `Listing` | Farmer FK, category FK, price per unit, unit (kg/sack), quantity, location, status, timestamps. |
 | `Conversation` | Listing FK, buyer FK, farmer FK. Unique on `(listing, buyer)`. |
@@ -505,6 +576,7 @@ Rules:
 
 ```bash
 python manage.py test
+python manage.py test accounts   # auth, profile, avatar, and signup flows
 ```
 
 Django's built-in test runner. For WebSocket consumers, override the channel layer with the in-memory backend so tests do not need Redis:
@@ -531,8 +603,13 @@ Pre-deployment checklist:
 - `DEBUG=False`
 - `SECRET_KEY` set to a unique value from the environment
 - `ALLOWED_HOSTS` set to the production domain
+- `CSRF_TRUSTED_ORIGINS` set to the public HTTPS origin
 - `DATABASE_URL` pointing to the Supabase transaction pooler
+- `DB_SSL_REQUIRE=True`
 - `REDIS_URL` pointing to a managed Redis instance
+- `SUPABASE_S3_*` and `SUPABASE_S3_REGION` configured so uploads persist
+- Site domain changed from `example.com` to the production domain
+- Supabase Data API disabled, or `anon` / `authenticated` grants revoked
 - `python manage.py collectstatic` executed
 - `DATABASE_URL="$DIRECT_URL" python manage.py migrate` executed
 - HTTPS enabled (required for secure WebSockets, `wss://`)
@@ -561,5 +638,8 @@ Static files in production are served by [WhiteNoise](https://whitenoise.readthe
 | `TemplateDoesNotExist: base.html` | Templates folder not registered | Add it to `TEMPLATES[0]["DIRS"]`. |
 | `InvalidCursorName` or cursor errors on Supabase | Server-side cursors through the transaction pooler | Set `DISABLE_SERVER_SIDE_CURSORS = True`. |
 | Migration hangs or fails on Supabase | Running `migrate` through the transaction pooler | Use `DIRECT_URL` for migrations. |
+| Google button missing from login | One or both Google credentials are missing | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then restart Django. |
+| CSRF verification fails on a deployed form | The public origin is not trusted | Add it to `CSRF_TRUSTED_ORIGINS`, including `https://`. |
+| Uploaded avatars disappear after redeploy | Files are on the disposable app filesystem | Configure `SUPABASE_S3_*` so Django uses Supabase Storage. |
 | WebSocket connects then closes immediately | Authorization check failed or origin rejected | Check the user is a conversation participant and the host is in `ALLOWED_HOSTS`. |
 | `redirect_uri_mismatch` on Google login | Callback URL not registered | Add the exact `/accounts/google/login/callback/` URL in Google Cloud Console. |
