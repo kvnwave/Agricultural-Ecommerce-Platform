@@ -69,10 +69,18 @@ class AuthPageTests(TestCase):
 class SignupFlowTests(TestCase):
     password = "temporary-pass-1"
 
+    def test_signup_page_offers_both_account_types(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertContains(response, "Account type")
+        self.assertContains(response, "Buyer")
+        self.assertContains(response, "Farmer")
+
     def test_signup_creates_user_profile_and_verification_email(self):
         response = self.client.post(
             reverse("account_signup"),
             {
+                "role": Profile.Role.BUYER,
                 "email": "new@example.com",
                 "password1": self.password,
                 "password2": self.password,
@@ -99,6 +107,7 @@ class SignupFlowTests(TestCase):
         response = self.client.post(
             reverse("account_signup"),
             {
+                "role": Profile.Role.BUYER,
                 "email": "taken@example.com",
                 "password1": self.password,
                 "password2": self.password,
@@ -113,6 +122,39 @@ class SignupFlowTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(User.objects.filter(email="taken@example.com").count(), 1)
+
+    def test_signup_creates_farmer_account(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.FARMER,
+                "email": "farmer@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("account_email_verification_sent"),
+            fetch_redirect_response=False,
+        )
+        user = User.objects.get(email="farmer@example.com")
+        self.assertEqual(user.profile.role, Profile.Role.FARMER)
+
+    def test_signup_requires_an_account_type(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "email": "no-role@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required.")
+        self.assertFalse(User.objects.filter(email="no-role@example.com").exists())
 
 
 class LoginFlowTests(TestCase):
