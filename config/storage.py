@@ -42,11 +42,22 @@ def supabase_storage_options(
         return options
 
     public_domain = custom_domain.strip()
-    for prefix in ("https://", "http://"):
-        public_domain = public_domain.removeprefix(prefix)
+    url_protocol = f"{parsed.scheme}:" if parsed.scheme else "https:"
+
+    if public_domain:
+        if "://" in public_domain:
+            domain_url = urlparse(public_domain)
+        else:
+            domain_url = urlparse(f"//{public_domain.lstrip('/')}")
+        if domain_url.scheme:
+            url_protocol = f"{domain_url.scheme}:"
+        public_domain = f"{domain_url.netloc}{domain_url.path}"
     public_domain = public_domain.rstrip("/")
 
     options["custom_domain"] = public_domain or (
         f"{parsed.netloc}/storage/v1/object/public/{bucket}"
     )
+    # django-storages defaults custom-domain URLs to HTTPS, which breaks
+    # Supabase running locally on plain HTTP.
+    options["url_protocol"] = url_protocol
     return options

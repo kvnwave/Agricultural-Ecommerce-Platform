@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.http import Http404
@@ -207,19 +208,29 @@ def listing_create(request):
 
 @login_required
 def listing_update(request, public_id):
-    listing = get_object_or_404(
-        Listing,
-        public_id=public_id,
-        farmer=request.user,
-    )
-
     if request.method == "POST":
-        form = ListingForm(request.POST, request.FILES, instance=listing)
-        if form.is_valid():
-            form.save()
+        with transaction.atomic():
+            # Lock the row before validating so two concurrent edits cannot
+            # each remove a different photo and both pass the minimum check.
+            listing = get_object_or_404(
+                Listing.objects.select_for_update(),
+                public_id=public_id,
+                farmer=request.user,
+            )
+            form = ListingForm(request.POST, request.FILES, instance=listing)
+            saved = form.is_valid()
+            if saved:
+                form.save()
+
+        if saved:
             messages.success(request, "Your listing has been updated.")
             return redirect("my_listings")
     else:
+        listing = get_object_or_404(
+            Listing,
+            public_id=public_id,
+            farmer=request.user,
+        )
         form = ListingForm(instance=listing)
 
     return render(

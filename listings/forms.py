@@ -1,6 +1,11 @@
+import logging
+
 from django import forms
+from django.db import transaction
 
 from .models import Listing, ListingImage
+
+logger = logging.getLogger(__name__)
 
 
 class MultipleFileInput(forms.FileInput):
@@ -116,23 +121,55 @@ class ListingForm(forms.ModelForm):
         return cleaned_data
 
     def save(self, commit=True):
-        listing = super().save(commit=commit)
         if not commit:
-            return listing
+            return super().save(commit=False)
 
-        removed = self.cleaned_data.get("remove_images")
-        if removed:
-            removed.delete()
+        with transaction.atomic():
+            listing = super().save(commit=True)
 
-        position = max(
-            (image.position for image in listing.images.all()),
-            default=-1,
-        ) + 1
-        for offset, image in enumerate(self.cleaned_data.get("images") or []):
-            ListingImage.objects.create(
-                listing=listing,
-                image=image,
-                position=position + offset,
-            )
+            removed = self.cleaned_data.get("remove_images")
+            if removed:
+                removed.delete()
+
+            created_images = []
+            try:
+                position = max(
+                    (image.position for image in listing.images.all()),
+                    default=-1,
+                ) + 1
+                for offset, image in enumerate(
+                    self.cleaned_data.get("images") or []
+                ):
+                    listing_image = ListingImage(
+                        listing=listing,
+                        image=image,
+                        position=position + offset,
+                    )
+                    # Track before saving: a storage write can succeed while
+                    # the row insert fails, and that file still needs cleanup.
+                    created_images.append(listing_image)
+                    listing_image.save()
+            except Exception:
+                self._delete_committed_images(created_images)
+                raise
 
         return listing
+
+    @staticmethod
+    def _delete_committed_images(images):
+        """Best-effort removal of files written before a failed save."""
+
+        for listing_image in images:
+            image_file = listing_image.image
+            # _committed is only set after upload_to has run and the storage
+            # backend has written the file, so this never deletes by the raw
+            # upload filename.
+            if not image_file or not image_file._committed:
+                continue
+            try:
+                image_file.storage.delete(image_file.name)
+            except Exception:
+                logger.exception(
+                    "Could not remove uploaded listing photo %s",
+                    image_file.name,
+                )

@@ -5,7 +5,9 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -175,6 +177,16 @@ class Listing(models.Model):
     def save(self, *args, **kwargs):
         """Track when a listing becomes sold out for future like alerts."""
 
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            # Only the status column can trigger a timestamp transition. Skip
+            # both here when the caller is not writing status, including the
+            # empty-set no-op.
+            if "status" not in update_fields:
+                return super().save(*args, **kwargs)
+            kwargs["update_fields"] = update_fields
+
         entering_sold_out = (
             self.status == self.Status.SOLD_OUT and self.sold_out_at is None
         )
@@ -187,9 +199,8 @@ class Listing(models.Model):
         elif leaving_sold_out:
             self.sold_out_at = None
 
-        update_fields = kwargs.get("update_fields")
         if update_fields is not None and (entering_sold_out or leaving_sold_out):
-            kwargs["update_fields"] = set(update_fields) | {"sold_out_at"}
+            kwargs["update_fields"] = update_fields | {"sold_out_at"}
 
         super().save(*args, **kwargs)
 
@@ -219,6 +230,17 @@ class ListingImage(models.Model):
 
     def __str__(self):
         return f"{self.listing.title} photo {self.position}"
+
+
+@receiver(post_delete, sender=ListingImage)
+def delete_listing_image_file(sender, instance, **kwargs):
+    """Remove the stored object only after the row deletion commits."""
+
+    name = instance.image.name
+    if not name:
+        return
+    storage = instance.image.storage
+    transaction.on_commit(lambda: storage.delete(name))
 
 
 class ListingLike(models.Model):

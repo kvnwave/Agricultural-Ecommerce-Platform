@@ -27,6 +27,7 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
         self.assertEqual(options["addressing_style"], "path")
         self.assertEqual(options["signature_version"], "s3v4")
         self.assertFalse(options["file_overwrite"])
+        self.assertEqual(options["url_protocol"], "https:")
 
     def test_explicit_custom_domain_is_normalized(self):
         options = self.make_options(
@@ -34,6 +35,32 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
         )
 
         self.assertEqual(options["custom_domain"], "cdn.example.com/media")
+
+    def test_explicit_http_custom_domain_keeps_protocol(self):
+        options = self.make_options(
+            custom_domain="http://cdn.example.com/media/",
+        )
+        storage = S3Storage(**options)
+
+        self.assertEqual(options["url_protocol"], "http:")
+        self.assertTrue(
+            storage.url("photo.png").startswith(
+                "http://cdn.example.com/media/photo.png"
+            )
+        )
+
+    def test_local_http_endpoint_returns_http_public_urls(self):
+        options = self.make_options(
+            endpoint="http://127.0.0.1:54321/storage/v1/s3",
+        )
+        storage = S3Storage(**options)
+
+        self.assertEqual(options["url_protocol"], "http:")
+        self.assertEqual(
+            storage.url("listings/photo.png"),
+            "http://127.0.0.1:54321/storage/v1/object/public/"
+            "listings/listings/photo.png",
+        )
 
     def test_storage_returns_public_object_url(self):
         storage = S3Storage(**self.make_options())
