@@ -28,6 +28,12 @@ from notifications import views as notifications_views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', accounts_views.profile_view, name='profile'),
+    # Roles must be chosen before allauth starts a social OAuth handshake.
+    path(
+        'accounts/social/<str:provider>/start/<str:role>/',
+        accounts_views.social_signup_start,
+        name='social_signup_start',
+    ),
     # allauth owns login, signup, verification, password reset, and social login.
     path('accounts/', include('allauth.urls')),
     path('analytics/', analytics_views.analytics_view, name='analytics'),
