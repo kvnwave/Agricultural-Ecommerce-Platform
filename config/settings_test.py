@@ -15,6 +15,7 @@ os.environ["SECRET_KEY"] = (
 )
 os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 os.environ["EMAIL_HOST"] = "smtp.test.invalid"
+os.environ["DEFAULT_FROM_EMAIL"] = "test@example.com"
 
 from config.settings import *  # noqa: E402,F403
 from config.settings import BASE_DIR  # noqa: E402
@@ -30,7 +31,6 @@ MAILERS = {
         "BACKEND": "django.core.mail.backends.locmem.EmailBackend",
     },
 }
-DEFAULT_FROM_EMAIL = "test@example.com"
 
 CACHES = {
     "default": {
