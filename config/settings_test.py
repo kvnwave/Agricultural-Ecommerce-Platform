@@ -16,6 +16,12 @@ os.environ["SECRET_KEY"] = (
 os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 os.environ["EMAIL_HOST"] = "smtp.test.invalid"
 os.environ["DEFAULT_FROM_EMAIL"] = "test@example.com"
+# Tests must never touch the configured Supabase project. Pin them to a local
+# SQLite file instead of whatever DATABASE_URL the developer's .env holds; the
+# runner would otherwise try to create a test database on the live server.
+os.environ["DATABASE_URL"] = "sqlite:///db.sqlite3"
+os.environ["DIRECT_URL"] = "sqlite:///db.sqlite3"
+os.environ["DB_SSL_REQUIRE"] = "False"
 
 from config.settings import *  # noqa: E402,F403
 from config.settings import BASE_DIR  # noqa: E402

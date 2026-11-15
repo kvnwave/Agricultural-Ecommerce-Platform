@@ -89,7 +89,7 @@ Optional:
 | Variable | Purpose |
 | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google login. The button only appears when both are set. |
-| `DIRECT_URL` | Direct Supabase connection, used for `migrate`. |
+| `DIRECT_URL` | Direct or session Supabase connection (port 5432), used by `config.settings_direct` for `migrate` and `createcachetable`. |
 | `DB_SSL_REQUIRE` | Force TLS for remote databases. |
 | `CSRF_TRUSTED_ORIGINS` | Public HTTPS origins, needed in production. |
 | `DJANGO_ADMIN_PATH` | Admin URL path. Defaults to `control-panel/`. |
@@ -159,13 +159,18 @@ python manage.py test --settings=config.settings_test
 
 CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
+Demo listings, when present, belong to the `demo-farmer@example.com` account.
+Remove them, their photos, and that account with
+`python manage.py delete_demo_listings`; `--dry-run` reports the counts first.
+Removal is permanent, including the stored photos.
+
 ## Deployment
 
 1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
 2. Configure `EMAIL_HOST`, `DEFAULT_FROM_EMAIL`, and credentials. allauth sends verification links, so signup fails without working SMTP.
-3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
-4. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
-5. Create the shared cache table on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py createcachetable`. allauth's login throttles use it.
+3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432). The web process only ever uses `DATABASE_URL`.
+4. Run migrations on the direct connection: `python manage.py migrate --settings=config.settings_direct`.
+5. Create the shared cache table on the direct connection: `python manage.py createcachetable --settings=config.settings_direct`. allauth's login throttles use it.
 6. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
 7. Change the default `example.com` row in **Admin → Sites** to your domain.
 8. Run `npm run build` and `python manage.py collectstatic --noinput`. WhiteNoise serves the hashed files from `staticfiles/`.
@@ -176,6 +181,8 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 
 ## Supabase Notes
 
+- Supabase's direct connection (port 5432) is IPv6-only. On an IPv4-only network, use the **Session pooler** string for `DIRECT_URL`; it runs migrations fine.
+- Passwords with reserved characters (`[`, `]`, `#`, `/`, `:`, `?`, `@`, spaces) are percent-encoded by `config/database.py` before parsing, so a password copied verbatim from the dashboard still works. A literal `%` is escaped as well, while an existing `%XX` escape is left intact.
 - Django connects directly to Postgres. Disable the Supabase Data API, or revoke the `anon` and `authenticated` grants on `public`, so `accounts_user` is not exposed.
 - Never put the Supabase `service_role` key in Django.
 - Set `SUPABASE_S3_REGION` to the region shown in **Storage → S3 connection**. A wrong region causes `SignatureDoesNotMatch`.
@@ -190,6 +197,9 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 | Google button missing | Set both Google credentials and restart. |
 | `redirect_uri_mismatch` | Register the exact callback URL in Google Cloud Console. |
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |
-| Cursor errors on Supabase | Run `migrate` through `DIRECT_URL`, not the transaction pooler. |
+| Cursor errors on Supabase | Run schema commands with `--settings=config.settings_direct` so they use `DIRECT_URL`, not the transaction pooler. |
+| `nodename nor servname provided` for the direct host | Supabase's direct connection is IPv6-only. Copy the **Session pooler** string (port 5432) into `DIRECT_URL` instead. |
+| `password authentication failed` on the pooler | Check the password is not still wrapped in the `[ ]` from the connection-string placeholder, then reset it in **Database settings** and re-copy both strings. |
+| `does not appear to be an IPv4 or IPv6 address` | A password contains `[` or `]`. `config/database.py` percent-encodes reserved password characters, so update the app if this still appears. |
 | Uploaded photos missing after redeploy | Configure `SUPABASE_S3_*`. |
 | `zsh: no matches found` on a pip install with brackets | Quote the package name, e.g. `"psycopg[binary]"`. |
