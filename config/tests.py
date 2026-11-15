@@ -1,4 +1,5 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 from storages.backends.s3 import S3Storage
 
 from config.storage import supabase_storage_options
@@ -82,3 +83,19 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
     def test_invalid_endpoint_is_rejected(self):
         with self.assertRaises(ValueError):
             self.make_options(endpoint="not-a-url")
+
+
+class ContentSecurityPolicyTests(TestCase):
+    def test_marketplace_sends_report_only_policy(self):
+        response = self.client.get(reverse("listings"))
+
+        policy = response.headers["Content-Security-Policy-Report-Only"]
+
+        self.assertIn("default-src 'self'", policy)
+        self.assertIn(
+            "img-src 'self' https://*.googleusercontent.com",
+            policy,
+        )
+        self.assertIn("object-src 'none'", policy)
+        self.assertIn("base-uri 'self'", policy)
+        self.assertNotIn("Content-Security-Policy", response.headers)
