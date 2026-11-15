@@ -31,8 +31,8 @@ POOLER_HOST_SUFFIX = "pooler.supabase.com"
 # Characters that cannot appear raw inside the password portion of a
 # connection URL. Password managers hand these out unescaped, and CPython then
 # reports a misleading "does not appear to be an IPv4 or IPv6 address" error
-# for a bracketed password. Percent signs are absent on purpose, so a password
-# that is already percent-encoded is left alone.
+# for a bracketed password. Percent signs are handled separately, so an
+# existing escape is not encoded twice.
 _PASSWORD_ESCAPES = {
     " ": "%20",
     '"': "%22",
@@ -46,13 +46,24 @@ _PASSWORD_ESCAPES = {
 }
 _PASSWORD_TRANSLATION = str.maketrans(_PASSWORD_ESCAPES)
 _AUTHORITY_END = re.compile(r"[/?#]")
+# A '%' that does not start a valid escape is a literal percent sign. The URL
+# parser decodes escapes in the password, so leaving it raw would send a
+# different string and silently fail authentication.
+_STRAY_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
+
+
+def _encode_password(password):
+    """Escape reserved characters, keeping existing ``%XX`` escapes intact."""
+
+    return _STRAY_PERCENT.sub("%25", password.translate(_PASSWORD_TRANSLATION))
 
 
 def encode_url_password(url):
     """Percent-encode reserved characters in a database URL's password.
 
-    Only characters that cannot appear raw in ``userinfo`` are escaped, so a
-    password that is already percent-encoded comes back unchanged.
+    Only characters that cannot appear raw in ``userinfo`` are escaped, plus a
+    literal ``%``, so a password that is already percent-encoded comes back
+    unchanged.
     """
 
     scheme, separator, rest = url.partition("://")
@@ -84,7 +95,7 @@ def encode_url_password(url):
     if not colon or not password:
         return url
 
-    encoded = password.translate(_PASSWORD_TRANSLATION)
+    encoded = _encode_password(password)
     return f"{scheme}{separator}{user}:{encoded}@{host}{tail}"
 
 
@@ -124,7 +135,7 @@ def database_config(url, *, ssl_require):
             "development or the Supabase transaction pooler URL."
         )
 
-    url = encode_url_password(url)
+    url = encode_url_password(url.strip())
     parsed = _parse_url(url)
     if parsed.scheme not in SUPPORTED_SCHEMES:
         raise ImproperlyConfigured(
@@ -143,37 +154,50 @@ def database_config(url, *, ssl_require):
 
 
 def uses_transaction_pooler(url):
-    """Whether ``url`` points at a Supabase transaction pooler endpoint."""
+    """Whether ``url`` points at a Supabase transaction pooler endpoint.
+
+    The session pooler shares the ``pooler.supabase.com`` host and only differs
+    by running on port 5432, where migrations work, so the port decides when it
+    is present.
+    """
 
     if not url:
         return False
 
-    parsed = _parse_url_or_none(url)
+    parsed = _parse_url_or_none(encode_url_password(url.strip()))
     if parsed is None or parsed.scheme not in POSTGRES_SCHEMES:
         return False
 
-    host = parsed.hostname or ""
-    return parsed.port == TRANSACTION_POOLER_PORT or host.endswith(
-        POOLER_HOST_SUFFIX
-    )
+    if parsed.port is not None:
+        return parsed.port == TRANSACTION_POOLER_PORT
+
+    return (parsed.hostname or "").endswith(POOLER_HOST_SUFFIX)
 
 
 def direct_database_config(database_url, direct_url, *, ssl_require):
     """Build the ``DATABASES`` entry used by schema-changing commands.
 
-    ``DIRECT_URL`` wins. Without it the runtime URL is reused so SQLite setups
-    keep working, and a warning is logged when that would send migrations
-    through the transaction pooler.
+    ``DIRECT_URL`` wins; without it the runtime URL is reused so SQLite setups
+    keep working. Either way, a warning is logged when the connection used for
+    schema changes is the transaction pooler, since migrations and
+    ``createcachetable`` fail there.
     """
 
-    url = (direct_url or "").strip()
-    if not url:
-        if uses_transaction_pooler(database_url):
+    direct = (direct_url or "").strip()
+    url = direct or database_url
+
+    if uses_transaction_pooler(url):
+        if direct:
+            logger.warning(
+                "DIRECT_URL points at the Supabase transaction pooler "
+                "(port 6543). Schema changes need the direct or session "
+                "connection (port 5432)."
+            )
+        else:
             logger.warning(
                 "DIRECT_URL is not set, so schema changes would run through the "
                 "Supabase transaction pooler. Set DIRECT_URL to the direct or "
                 "session connection (port 5432)."
             )
-        url = database_url
 
     return database_config(url, ssl_require=ssl_require)

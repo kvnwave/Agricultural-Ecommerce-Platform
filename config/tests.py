@@ -142,10 +142,29 @@ class DatabaseConfigTests(SimpleTestCase):
     def test_transaction_pooler_is_detected_by_host(self):
         self.assertTrue(uses_transaction_pooler(POOLER_URL))
 
+    def test_pooler_detection_works_with_reserved_password_characters(self):
+        # Detection runs before parsing succeeds for bracketed passwords.
+        self.assertTrue(
+            uses_transaction_pooler(
+                "postgresql://postgres.emlaiex:pa[ss]@"
+                "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+            )
+        )
+
     def test_direct_connection_is_not_a_pooler(self):
         self.assertFalse(uses_transaction_pooler(DIRECT_URL))
         self.assertFalse(uses_transaction_pooler("sqlite:///db.sqlite3"))
         self.assertFalse(uses_transaction_pooler(""))
+
+    def test_session_pooler_is_not_a_transaction_pooler(self):
+        # The session pooler shares the transaction pooler's host; only the
+        # port differs, and migrations work on 5432.
+        self.assertFalse(
+            uses_transaction_pooler(
+                "postgresql://postgres.project:secret@"
+                "aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+            )
+        )
 
 
 class DirectDatabaseConfigTests(SimpleTestCase):
@@ -169,6 +188,20 @@ class DirectDatabaseConfigTests(SimpleTestCase):
             config["HOST"],
             "aws-0-ap-southeast-1.pooler.supabase.com",
         )
+
+    def test_pooler_direct_url_is_reported(self):
+        with self.assertLogs("config.database", level="WARNING") as logs:
+            config = direct_database_config(
+                DIRECT_URL,
+                POOLER_URL,
+                ssl_require=True,
+            )
+
+        self.assertIn(
+            "DIRECT_URL points at the Supabase transaction pooler",
+            logs.output[0],
+        )
+        self.assertEqual(str(config["PORT"]), "6543")
 
     def test_sqlite_fallback_does_not_warn(self):
         with self.assertNoLogs("config.database", level="WARNING"):
@@ -195,7 +228,18 @@ class DirectDatabaseConfigTests(SimpleTestCase):
 
 class DatabaseUrlPasswordTests(SimpleTestCase):
     def test_reserved_password_characters_are_encoded(self):
-        for password in ('pa ss', 'pa"ss', "pa#ss", "pa/ss", "pa:ss", "pa?ss", "pa@ss", "pa[ss]", "pa&ss"):
+        passwords = (
+            'pa ss',
+            'pa"ss',
+            "pa#ss",
+            "pa/ss",
+            "pa:ss",
+            "pa?ss",
+            "pa@ss",
+            "pa[ss]",
+            "pa&ss",
+        )
+        for password in passwords:
             with self.subTest(password=password):
                 url = (
                     "postgresql://postgres."
@@ -217,6 +261,24 @@ class DatabaseUrlPasswordTests(SimpleTestCase):
             encode_url_password(url),
             "postgresql://postgres:pa%5Bss%5Dword@db.project.supabase.co:5432/postgres",
         )
+
+    def test_literal_percent_in_password_survives_parsing(self):
+        # A raw '%' would otherwise decode into a different password.
+        config = database_config(
+            "postgresql://postgres:pa%ss@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa%ss")
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+
+    def test_percent_with_brackets_is_encoded_once(self):
+        config = database_config(
+            "postgresql://postgres:pa[%]ss@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa[%]ss")
 
     def test_password_encoding_is_idempotent(self):
         url = "postgresql://postgres:pa[ss]%40word@db.project.supabase.co:5432/postgres"
