@@ -35,6 +35,9 @@ class Listing(models.Model):
     """Produce offered by a farmer, shaped after a marketplace listing."""
 
     MAX_IMAGES = 5
+    # Bound how much a single account can publish and how fast it can create.
+    MAX_OPEN_LISTINGS = 25
+    MAX_LISTINGS_PER_DAY = 10
 
     class Condition(models.TextChoices):
         FRESH = "fresh", "Fresh Harvest"
