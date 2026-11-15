@@ -9,6 +9,7 @@ from allauth.core import context as allauth_context
 from allauth.socialaccount.forms import SignupForm as AllauthSocialSignupForm
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.conf import settings
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -22,7 +23,7 @@ from PIL import Image
 from . import usernames
 from .adapters import AccountAdapter
 from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
-from .models import Profile, User
+from .models import Profile, UsernameHistory, User
 
 
 def image_bytes():
@@ -56,6 +57,93 @@ class UserModelTests(TestCase):
                 User.objects.create_user(
                     "second", email="same@example.com", password="temporary-pass-1"
                 )
+
+    def test_username_changed_at_starts_empty(self):
+        user = User.objects.create_user(
+            "never-changed",
+            email="never@example.com",
+            password="temporary-pass-1",
+        )
+
+        self.assertIsNone(user.username_changed_at)
+
+    def test_case_only_duplicate_username_is_rejected(self):
+        User.objects.create_user(
+            "CaseUser",
+            email="first-case@example.com",
+            password="temporary-pass-1",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                User.objects.create_user(
+                    "caseuser",
+                    email="second-case@example.com",
+                    password="temporary-pass-1",
+                )
+
+
+class UsernameHistoryTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password=self.password,
+        )
+        self.admin_user = User.objects.create_superuser(
+            "support-admin",
+            email="admin@example.com",
+            password=self.password,
+        )
+
+    def test_history_records_old_and_new_handles(self):
+        entry = UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+            changed_by=self.admin_user,
+            reason=UsernameHistory.Reason.USER,
+        )
+
+        self.assertEqual(str(entry), "farmer_jane -> jane_grows")
+        self.assertEqual(list(self.user.username_history.all()), [entry])
+
+    def test_deleting_user_removes_history(self):
+        UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+        )
+
+        self.user.delete()
+
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_deleting_actor_keeps_history(self):
+        entry = UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+            changed_by=self.admin_user,
+            reason=UsernameHistory.Reason.ADMIN,
+        )
+
+        self.admin_user.delete()
+        entry.refresh_from_db()
+
+        self.assertIsNone(entry.changed_by)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.ADMIN)
+
+    def test_history_admin_is_read_only(self):
+        model_admin = admin.site._registry[UsernameHistory]
+        request = RequestFactory().get("/admin/")
+        request.user = self.admin_user
+
+        self.assertFalse(model_admin.has_add_permission(request))
+        self.assertFalse(model_admin.has_change_permission(request))
+        self.assertFalse(model_admin.has_delete_permission(request))
 
 
 class UsernamePolicyTests(TestCase):
