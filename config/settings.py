@@ -121,8 +121,9 @@ AUTH_USER_MODEL = 'accounts.User'
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
-    # Keeps Django admin password login and permission checks working.
-    'django.contrib.auth.backends.ModelBackend',
+    # Keeps Django admin password login and permission checks working, and
+    # loads the profile with the session user.
+    'accounts.backends.ProfileModelBackend',
     # Adds email-based login and resolves social accounts through allauth.
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
