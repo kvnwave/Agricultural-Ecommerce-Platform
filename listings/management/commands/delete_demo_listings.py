@@ -27,16 +27,17 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         farmers = User.objects.filter(email=DEMO_EMAIL)
         listings = Listing.objects.filter(farmer__email=DEMO_EMAIL)
-        photos = ListingImage.objects.filter(listing__in=listings).count()
+        farmer_count = farmers.count()
         listing_count = listings.count()
+        photos = ListingImage.objects.filter(listing__in=listings).count()
 
-        if not listing_count and not farmers.exists():
+        if not listing_count and not farmer_count:
             self.stdout.write("No demo listings found.")
             return
 
         summary = (
             f"{listing_count} listing(s), {photos} photo(s), "
-            f"and {farmers.count()} demo account"
+            f"and {farmer_count} demo account"
         )
         if options["dry_run"]:
             self.stdout.write(f"Would delete {summary}.")
