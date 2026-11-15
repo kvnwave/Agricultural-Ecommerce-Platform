@@ -133,6 +133,22 @@ ACCOUNT_ADAPTER = 'accounts.adapters.AccountAdapter'
 USERNAME_CHANGE_COOLDOWN_DAYS = 7
 # Email is the account identifier, so an unverified address cannot log in.
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+# Make allauth's throttles explicit. The cache below is shared by every
+# process, so the limits hold across workers.
+ACCOUNT_RATE_LIMITS = {
+    'login': '30/m/ip',
+    'login_failed': '10/m/ip,5/5m/key',
+    'signup': '20/m/ip',
+    'reset_password': '20/m/ip,5/m/key',
+    'confirm_email': '1/180s/key',
+}
+# A database cache is shared by every worker and host, unlike locmem.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',
+    }
+}
 # Temporary landing page until the marketplace dashboard exists.
 LOGIN_REDIRECT_URL = '/listings/'
 
