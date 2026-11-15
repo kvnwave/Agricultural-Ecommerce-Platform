@@ -24,6 +24,7 @@ from PIL import Image
 
 from . import usernames
 from .adapters import AccountAdapter
+from .backends import ProfileModelBackend
 from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
 from .models import Profile, UsernameHistory, User
 
@@ -83,6 +84,33 @@ class UserModelTests(TestCase):
                     email="second-case@example.com",
                     password="temporary-pass-1",
                 )
+
+
+class ProfileModelBackendTests(TestCase):
+    def test_session_user_loads_profile_in_the_same_query(self):
+        user = User.objects.create_user(
+            "backend-user",
+            email="backend@example.com",
+            password="temporary-pass-1",
+        )
+        user.profile.role = Profile.Role.FARMER
+        user.profile.save(update_fields=["role"])
+
+        loaded = ProfileModelBackend().get_user(user.pk)
+
+        self.assertEqual(loaded.pk, user.pk)
+        with self.assertNumQueries(0):
+            self.assertEqual(loaded.profile.role, Profile.Role.FARMER)
+
+    def test_inactive_user_is_rejected(self):
+        user = User.objects.create_user(
+            "inactive-user",
+            email="inactive@example.com",
+            password="temporary-pass-1",
+            is_active=False,
+        )
+
+        self.assertIsNone(ProfileModelBackend().get_user(user.pk))
 
 
 class UsernameHistoryTests(TestCase):
