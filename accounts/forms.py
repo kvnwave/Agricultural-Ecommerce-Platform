@@ -78,6 +78,34 @@ class SocialSignupForm(AllauthSocialSignupForm):
         return user
 
 
+class UsernameChangeForm(forms.Form):
+    username = forms.CharField(
+        label="New username",
+        min_length=usernames.USERNAME_MIN_LENGTH,
+        max_length=usernames.USERNAME_MAX_LENGTH,
+        help_text=USERNAME_HELP_TEXT,
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "username",
+                "maxlength": str(usernames.USERNAME_MAX_LENGTH),
+            }
+        ),
+    )
+
+    def __init__(self, *args, user, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+        self.fields["username"].initial = user.username
+
+    def clean_username(self):
+        value = usernames.validate_username(self.cleaned_data["username"])
+        if value == usernames.normalize_username(self.user.username):
+            raise forms.ValidationError("That is already your username.")
+        if usernames.username_exists(value):
+            raise forms.ValidationError("That username is already taken.")
+        return value
+
+
 class ProfileForm(forms.ModelForm):
     class Meta:
         model = Profile

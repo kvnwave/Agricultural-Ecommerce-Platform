@@ -1,6 +1,7 @@
 import io
 import shutil
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +19,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 
 from . import usernames
@@ -247,6 +249,149 @@ class AccountAdapterTests(TestCase):
 
         self.assertEqual(handle, "user-1a2b3c4d")
         generate.assert_called_once_with()
+
+
+class UsernameChangeTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "old_handle",
+            email="user@example.com",
+            password=self.password,
+        )
+        self.client.force_login(self.user)
+
+    def test_requires_login(self):
+        self.client.logout()
+
+        response = self.client.get(reverse("username_change"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('account_login')}?next={reverse('username_change')}",
+        )
+
+    def test_page_shows_current_username_and_form(self):
+        response = self.client.get(reverse("username_change"))
+
+        self.assertContains(response, "old_handle")
+        self.assertContains(response, "Save username")
+
+    def test_profile_shows_username_and_cooldown(self):
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.get(reverse("profile"))
+
+        self.assertContains(response, "@old_handle")
+        self.assertContains(response, "Next change")
+
+    def test_first_change_is_immediate_and_creates_history(self):
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": " Farmer_Jane "},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "farmer_jane")
+        self.assertIsNotNone(self.user.username_changed_at)
+
+        entry = UsernameHistory.objects.get(user=self.user)
+        self.assertEqual(entry.old_username, "old_handle")
+        self.assertEqual(entry.new_username, "farmer_jane")
+        self.assertEqual(entry.changed_by, self.user)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.USER)
+
+    def test_second_change_waits_for_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=1)
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "too_soon"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You can change your username again on")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_change_is_allowed_after_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=8)
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "allowed_now"},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "allowed_now")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_staff_bypass_cooldown(self):
+        self.user.is_staff = True
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["is_staff", "username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "staff_handle"},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "staff_handle")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_rejects_same_username(self):
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "OLD_HANDLE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That is already your username.")
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_rejects_duplicate_username(self):
+        User.objects.create_user(
+            "taken_handle",
+            email="taken@example.com",
+            password=self.password,
+        )
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "Taken_Handle"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is already taken.")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
+
+    def test_rejects_invalid_and_reserved_usernames(self):
+        cases = (
+            ("bad name", "Start and end with a letter or number."),
+            ("support", "That username is reserved."),
+        )
+
+        for value, message in cases:
+            with self.subTest(value=value):
+                response = self.client.post(
+                    reverse("username_change"),
+                    {"username": value},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, message)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
 
 
 class AuthPageTests(TestCase):

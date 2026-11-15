@@ -2,10 +2,14 @@
 
 import re
 import secrets
+from datetime import timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 
-from .models import User
+from .models import UsernameHistory, User
 
 USERNAME_MIN_LENGTH = 3
 USERNAME_MAX_LENGTH = 30
@@ -85,3 +89,83 @@ def generate_username():
         if not username_exists(candidate):
             return candidate
     raise RuntimeError("Unable to generate a unique username.")
+
+
+class UsernameChangeError(Exception):
+    """Base class for user-facing username change failures."""
+
+
+class UsernameTakenError(UsernameChangeError):
+    """Another account already holds the requested handle."""
+
+
+class UsernameUnchangedError(UsernameChangeError):
+    """The requested handle is the one already in use."""
+
+
+class UsernameCooldownError(UsernameChangeError):
+    """The seven-day cooldown has not elapsed."""
+
+    def __init__(self, available_at):
+        self.available_at = available_at
+        super().__init__("Username change is on cooldown.")
+
+
+def username_cooldown_ends(user):
+    """When the user may change their handle again, or ``None`` if now."""
+
+    if user.username_changed_at is None:
+        return None
+    available_at = user.username_changed_at + timedelta(
+        days=settings.USERNAME_CHANGE_COOLDOWN_DAYS
+    )
+    return available_at if available_at > timezone.now() else None
+
+
+def change_username(
+    user,
+    new_username,
+    *,
+    actor=None,
+    reason=UsernameHistory.Reason.USER,
+    enforce_cooldown=True,
+):
+    """Atomically rename a user, enforce the cooldown, and log the change.
+
+    ``actor`` is the account making the change. Staff actors bypass the
+    cooldown; every successful change still resets it.
+    """
+
+    new_username = validate_username(new_username)
+    try:
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(pk=user.pk)
+            old_username = locked.username
+
+            if new_username == normalize_username(old_username):
+                raise UsernameUnchangedError
+            if enforce_cooldown and not (actor and actor.is_staff):
+                available_at = username_cooldown_ends(locked)
+                if available_at:
+                    raise UsernameCooldownError(available_at)
+            if (
+                User.objects.filter(username__iexact=new_username)
+                .exclude(pk=locked.pk)
+                .exists()
+            ):
+                raise UsernameTakenError
+
+            locked.username = new_username
+            locked.username_changed_at = timezone.now()
+            locked.save(update_fields=["username", "username_changed_at"])
+            UsernameHistory.objects.create(
+                user=locked,
+                old_username=old_username,
+                new_username=new_username,
+                changed_by=actor,
+                reason=reason,
+            )
+    except IntegrityError as exc:
+        raise UsernameTakenError from exc
+    return locked
+
