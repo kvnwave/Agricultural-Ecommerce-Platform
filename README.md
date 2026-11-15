@@ -40,7 +40,7 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 npm install
 
-cp .env.example .env             # then set SECRET_KEY
+cp .env.example .env             # then set SECRET_KEY and DEBUG=True
 python manage.py migrate
 python manage.py createsuperuser
 ```
@@ -69,7 +69,10 @@ Build CSS once without watching: `npm run build`.
 
 ## Environment Variables
 
-Copy `.env.example` to `.env`. Never commit `.env`.
+Copy `.env.example` to `.env`. Never commit `.env`. The example ships with
+production-safe defaults (`DEBUG=False`), so local development must set
+`DEBUG=True`; without it Django will not serve static files through
+`runserver` and will expect a real mail server.
 
 Required for local development:
 
