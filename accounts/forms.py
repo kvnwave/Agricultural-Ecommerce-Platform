@@ -3,9 +3,27 @@ from allauth.core import context as allauth_context
 from allauth.socialaccount.forms import SignupForm as AllauthSocialSignupForm
 from django import forms
 
+from . import usernames
 from .models import Profile
 
 SOCIAL_SIGNUP_ROLE_SESSION_KEY = "social_signup_role"
+USERNAME_HELP_TEXT = (
+    f"{usernames.USERNAME_MIN_LENGTH}-{usernames.USERNAME_MAX_LENGTH} "
+    "characters. Letters, numbers, underscores, and hyphens. "
+    "Leave blank and we'll generate one."
+)
+
+
+def configure_username_field(form):
+    """Make allauth's optional username field match the marketplace policy."""
+
+    field = form.fields.get("username")
+    if field is None:
+        return
+    field.min_length = usernames.USERNAME_MIN_LENGTH
+    field.max_length = usernames.USERNAME_MAX_LENGTH
+    field.widget.attrs["maxlength"] = str(usernames.USERNAME_MAX_LENGTH)
+    field.help_text = USERNAME_HELP_TEXT
 
 
 def account_role_field(*, initial=None):
@@ -27,7 +45,11 @@ class SignupForm(AllauthSignupForm):
     """allauth's email signup plus the marketplace account type."""
 
     role = account_role_field(initial=Profile.Role.BUYER)
-    field_order = ["role", "email", "password1", "password2"]
+    field_order = ["role", "username", "email", "password1", "password2"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        configure_username_field(self)
 
     def save(self, request):
         user = super().save(request)
@@ -39,10 +61,11 @@ class SocialSignupForm(AllauthSocialSignupForm):
     """Social signup keeps the role chosen before leaving for the provider."""
 
     role = account_role_field()
-    field_order = ["role", "email"]
+    field_order = ["role", "username", "email"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        configure_username_field(self)
         request = allauth_context.request
         role = request.session.get(SOCIAL_SIGNUP_ROLE_SESSION_KEY) if request else None
         if role in Profile.Role.values:

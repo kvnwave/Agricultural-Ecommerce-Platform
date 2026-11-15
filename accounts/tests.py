@@ -186,6 +186,92 @@ class SignupFlowTests(TestCase):
         self.assertContains(response, "Buyer")
         self.assertContains(response, "Farmer")
 
+    def test_signup_page_shows_optional_username_field(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertContains(response, "Username (optional)")
+        self.assertContains(response, "Leave blank and we")
+
+    def test_signup_uses_preferred_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "  Farm_Shop ",
+                "email": "preferred@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("account_email_verification_sent"),
+            fetch_redirect_response=False,
+        )
+        user = User.objects.get(email="preferred@example.com")
+        self.assertEqual(user.username, "farm_shop")
+
+    def test_signup_rejects_invalid_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "not a username",
+                "email": "invalid-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Start and end with a letter or number.")
+        self.assertFalse(
+            User.objects.filter(email="invalid-handle@example.com").exists()
+        )
+
+    def test_signup_rejects_duplicate_username_ignoring_case(self):
+        User.objects.create_user(
+            "farm_shop",
+            email="existing@example.com",
+            password=self.password,
+        )
+
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "FARM_SHOP",
+                "email": "duplicate-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is already taken.")
+        self.assertFalse(
+            User.objects.filter(email="duplicate-handle@example.com").exists()
+        )
+
+    def test_signup_rejects_reserved_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "Support",
+                "email": "reserved-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is reserved.")
+        self.assertFalse(
+            User.objects.filter(email="reserved-handle@example.com").exists()
+        )
+
     def test_signup_creates_user_profile_and_verification_email(self):
         response = self.client.post(
             reverse("account_signup"),
@@ -313,6 +399,23 @@ class SocialSignupRoleTests(TestCase):
 
         self.assertTrue(form.fields["role"].required)
         self.assertIsNone(form.fields["role"].initial)
+
+    def test_social_form_username_is_optional_and_scoped(self):
+        form = SocialSignupForm(sociallogin=self.sociallogin())
+
+        field = form.fields["username"]
+        self.assertFalse(field.required)
+        self.assertEqual(field.max_length, 30)
+        self.assertIn("Leave blank", field.help_text)
+
+    def test_social_form_clears_provider_username_prefill(self):
+        sociallogin = SocialLogin(
+            user=User(username="Social Person", email="social@example.com")
+        )
+
+        form = SocialSignupForm(sociallogin=sociallogin)
+
+        self.assertEqual(form.initial["username"], "")
 
     def test_social_form_prefills_role_from_session(self):
         request = RequestFactory().get("/")

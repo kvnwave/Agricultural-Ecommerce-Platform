@@ -1,6 +1,7 @@
 """allauth hooks that apply the marketplace username policy."""
 
 from allauth.account.adapter import DefaultAccountAdapter
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.core.exceptions import ValidationError
 
 from . import usernames
@@ -25,3 +26,12 @@ class AccountAdapter(DefaultAccountAdapter):
         """Ignore name/email-derived candidates and use a neutral handle."""
 
         return usernames.generate_username()
+
+
+class SocialAccountAdapter(DefaultSocialAccountAdapter):
+    """Do not carry provider names or email addresses into the username."""
+
+    def get_signup_form_initial_data(self, sociallogin):
+        initial = super().get_signup_form_initial_data(sociallogin)
+        initial["username"] = ""
+        return initial
