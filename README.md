@@ -176,6 +176,8 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 
 ## Supabase Notes
 
+- Supabase's direct connection (port 5432) is IPv6-only. On an IPv4-only network, use the **Session pooler** string for `DIRECT_URL`; it runs migrations fine.
+- Passwords with reserved characters (`[`, `]`, `#`, `/`, `:`, `?`, `@`, spaces) are percent-encoded by `config/database.py` before parsing, so a password copied verbatim from the dashboard still works.
 - Django connects directly to Postgres. Disable the Supabase Data API, or revoke the `anon` and `authenticated` grants on `public`, so `accounts_user` is not exposed.
 - Never put the Supabase `service_role` key in Django.
 - Set `SUPABASE_S3_REGION` to the region shown in **Storage → S3 connection**. A wrong region causes `SignatureDoesNotMatch`.
@@ -191,5 +193,8 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 | `redirect_uri_mismatch` | Register the exact callback URL in Google Cloud Console. |
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |
 | Cursor errors on Supabase | Run schema commands with `--settings=config.settings_direct` so they use `DIRECT_URL`, not the transaction pooler. |
+| `nodename nor servname provided` for the direct host | Supabase's direct connection is IPv6-only. Copy the **Session pooler** string (port 5432) into `DIRECT_URL` instead. |
+| `password authentication failed` on the pooler | The password in the URL is stale. Reset it in **Database settings**, then re-copy both connection strings. |
+| `does not appear to be an IPv4 or IPv6 address` | A password contains `[` or `]`. `config/database.py` percent-encodes reserved password characters, so update the app if this still appears. |
 | Uploaded photos missing after redeploy | Configure `SUPABASE_S3_*`. |
 | `zsh: no matches found` on a pip install with brackets | Quote the package name, e.g. `"psycopg[binary]"`. |
