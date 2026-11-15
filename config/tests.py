@@ -130,3 +130,7 @@ class StaticFilesTests(SimpleTestCase):
 
     def test_htmx_is_vendored(self):
         self.assertIsNotNone(finders.find("js/htmx.min.js"))
+
+    def test_timezone_is_manila(self):
+        self.assertEqual(settings.TIME_ZONE, "Asia/Manila")
+        self.assertTrue(settings.USE_TZ)
