@@ -33,6 +33,11 @@ urlpatterns = [
     ),
     path('admin/', admin.site.urls),
     path('accounts/', accounts_views.profile_view, name='profile'),
+    path(
+        'accounts/username/',
+        accounts_views.username_change,
+        name='username_change',
+    ),
     # Roles must be chosen before allauth starts a social OAuth handshake.
     path(
         'accounts/social/<str:provider>/start/<str:role>/',
