@@ -23,7 +23,7 @@ from accounts.models import Profile, User
 
 from .forms import ListingForm
 from .models import Category, Listing, ListingImage, ListingLike
-from .views import LISTINGS_PER_PAGE
+from .views import LISTINGS_PER_PAGE, SEARCH_QUERY_MAX_LENGTH
 
 
 def image_bytes():
@@ -1147,6 +1147,15 @@ class ListingBrowseTests(TestCase):
             with self.subTest(query=query):
                 response = self.client.get(reverse("listings"), {"q": query})
                 self.assertContains(response, expected)
+
+    def test_search_query_is_capped(self):
+        response = self.client.get(reverse("listings"), {"q": "a" * 500})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            len(response.context["query"]),
+            SEARCH_QUERY_MAX_LENGTH,
+        )
 
     def test_browse_filters_by_category(self):
         response = self.client.get(
