@@ -5,12 +5,14 @@ import uuid
 import warnings
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 from unittest import mock
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.storage import storages
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
@@ -1546,3 +1548,82 @@ class ListingLikeTests(TestCase):
         self.listing.delete()
 
         self.assertFalse(ListingLike.objects.exists())
+
+
+class DeleteDemoListingsCommandTests(TestCase):
+    """Demo data must be removable without touching real listings."""
+
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+        self.category = Category.objects.create(name="Demo Produce")
+
+        self.demo_farmer = User.objects.create_user(
+            "demo-farmer",
+            email="demo-farmer@example.com",
+            password="temporary-pass-1",
+        )
+        self.demo_listing = self.make_listing(self.demo_farmer, "Demo tomatoes")
+
+        self.real_farmer = create_farmer("real-farmer")
+        self.real_listing = self.make_listing(self.real_farmer, "Real tomatoes")
+
+    def make_listing(self, farmer, title):
+        return Listing.objects.create(
+            farmer=farmer,
+            category=self.category,
+            title=title,
+            description="Fixture listing.",
+            price=Decimal("10.00"),
+        )
+
+    def test_dry_run_reports_without_deleting(self):
+        output = StringIO()
+
+        call_command("delete_demo_listings", "--dry-run", stdout=output)
+
+        self.assertIn("Would delete", output.getvalue())
+        self.assertIn("1 listing(s)", output.getvalue())
+        self.assertTrue(Listing.objects.filter(pk=self.demo_listing.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.demo_farmer.pk).exists())
+
+    def test_command_deletes_demo_data_and_keeps_real_listings(self):
+        output = StringIO()
+
+        call_command("delete_demo_listings", stdout=output)
+
+        self.assertIn("Deleted", output.getvalue())
+        self.assertFalse(Listing.objects.filter(pk=self.demo_listing.pk).exists())
+        self.assertFalse(User.objects.filter(pk=self.demo_farmer.pk).exists())
+        self.assertTrue(Listing.objects.filter(pk=self.real_listing.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.real_farmer.pk).exists())
+
+    def test_command_removes_photos_from_storage(self):
+        listing = self.make_listing(self.demo_farmer, "Demo with photo")
+        photo = ListingImage.objects.create(
+            listing=listing,
+            image=SimpleUploadedFile(
+                "demo.png",
+                image_bytes(),
+                content_type="image/png",
+            ),
+        )
+        storage = photo.image.storage
+        name = photo.image.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("delete_demo_listings", stdout=StringIO())
+
+        self.assertFalse(ListingImage.objects.filter(pk=photo.pk).exists())
+        self.assertFalse(storage.exists(name))
+
+    def test_command_reports_when_there_is_nothing_to_delete(self):
+        self.demo_farmer.delete()
+        output = StringIO()
+
+        call_command("delete_demo_listings", stdout=output)
+
+        self.assertIn("No demo listings found", output.getvalue())

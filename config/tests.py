@@ -1,11 +1,24 @@
 from django.conf import settings
 from django.contrib.staticfiles import finders
+from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from storages.backends.s3 import S3Storage
 
 from config import settings as base_settings
+from config.database import (
+    database_config,
+    direct_database_config,
+    encode_url_password,
+    uses_transaction_pooler,
+)
 from config.storage import supabase_storage_options
+
+POOLER_URL = (
+    "postgresql://postgres.project:secret@"
+    "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+)
+DIRECT_URL = "postgresql://postgres:secret@db.project.supabase.co:5432/postgres"
 
 
 class SupabaseStorageOptionsTests(SimpleTestCase):
@@ -86,6 +99,235 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
     def test_invalid_endpoint_is_rejected(self):
         with self.assertRaises(ValueError):
             self.make_options(endpoint="not-a-url")
+
+
+class DatabaseConfigTests(SimpleTestCase):
+    def test_sqlite_url_is_not_given_tls_options(self):
+        config = database_config("sqlite:///db.sqlite3", ssl_require=True)
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.sqlite3")
+        self.assertFalse(config.get("OPTIONS"))
+
+    def test_postgres_url_requires_tls_outside_debug(self):
+        config = database_config(POOLER_URL, ssl_require=True)
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.postgresql")
+        self.assertEqual(config["OPTIONS"]["sslmode"], "require")
+
+    def test_postgres_url_can_skip_tls(self):
+        config = database_config(POOLER_URL, ssl_require=False)
+
+        self.assertNotEqual(config.get("OPTIONS", {}).get("sslmode"), "require")
+
+    def test_server_side_cursors_are_disabled(self):
+        config = database_config(POOLER_URL, ssl_require=True)
+
+        self.assertTrue(config["DISABLE_SERVER_SIDE_CURSORS"])
+
+    def test_missing_url_is_rejected(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "DATABASE_URL"):
+            database_config("", ssl_require=True)
+
+    def test_unsupported_scheme_is_rejected(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "mysql"):
+            database_config("mysql://user:secret@localhost/db", ssl_require=True)
+
+    def test_transaction_pooler_is_detected_by_port(self):
+        self.assertTrue(
+            uses_transaction_pooler(
+                "postgresql://postgres:secret@db.example.com:6543/postgres"
+            )
+        )
+
+    def test_transaction_pooler_is_detected_by_host(self):
+        self.assertTrue(uses_transaction_pooler(POOLER_URL))
+
+    def test_pooler_detection_works_with_reserved_password_characters(self):
+        # Detection runs before parsing succeeds for bracketed passwords.
+        self.assertTrue(
+            uses_transaction_pooler(
+                "postgresql://postgres.emlaiex:pa[ss]@"
+                "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+            )
+        )
+
+    def test_direct_connection_is_not_a_pooler(self):
+        self.assertFalse(uses_transaction_pooler(DIRECT_URL))
+        self.assertFalse(uses_transaction_pooler("sqlite:///db.sqlite3"))
+        self.assertFalse(uses_transaction_pooler(""))
+
+    def test_session_pooler_is_not_a_transaction_pooler(self):
+        # The session pooler shares the transaction pooler's host; only the
+        # port differs, and migrations work on 5432.
+        self.assertFalse(
+            uses_transaction_pooler(
+                "postgresql://postgres.project:secret@"
+                "aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+            )
+        )
+
+
+class DirectDatabaseConfigTests(SimpleTestCase):
+    def test_direct_url_takes_precedence(self):
+        config = direct_database_config(
+            POOLER_URL,
+            DIRECT_URL,
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+        self.assertEqual(str(config["PORT"]), "5432")
+        self.assertEqual(config["OPTIONS"]["sslmode"], "require")
+
+    def test_missing_direct_url_warns_when_falling_back_to_pooler(self):
+        with self.assertLogs("config.database", level="WARNING") as logs:
+            config = direct_database_config(POOLER_URL, "", ssl_require=True)
+
+        self.assertIn("DIRECT_URL", logs.output[0])
+        self.assertEqual(
+            config["HOST"],
+            "aws-0-ap-southeast-1.pooler.supabase.com",
+        )
+
+    def test_pooler_direct_url_is_reported(self):
+        with self.assertLogs("config.database", level="WARNING") as logs:
+            config = direct_database_config(
+                DIRECT_URL,
+                POOLER_URL,
+                ssl_require=True,
+            )
+
+        self.assertIn(
+            "DIRECT_URL points at the Supabase transaction pooler",
+            logs.output[0],
+        )
+        self.assertEqual(str(config["PORT"]), "6543")
+
+    def test_sqlite_fallback_does_not_warn(self):
+        with self.assertNoLogs("config.database", level="WARNING"):
+            config = direct_database_config(
+                "sqlite:///db.sqlite3",
+                "",
+                ssl_require=True,
+            )
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.sqlite3")
+
+    def test_runtime_settings_build_from_the_configured_url(self):
+        # The test runner rewrites the alias's NAME to its own database, so
+        # only the engine and cursor settings are comparable here.
+        expected = database_config(
+            base_settings.DATABASE_URL,
+            ssl_require=base_settings.DB_SSL_REQUIRE,
+        )
+        runtime = base_settings.DATABASES["default"]
+
+        self.assertEqual(runtime["ENGINE"], expected["ENGINE"])
+        self.assertTrue(runtime["DISABLE_SERVER_SIDE_CURSORS"])
+
+
+class DatabaseUrlPasswordTests(SimpleTestCase):
+    def test_reserved_password_characters_are_encoded(self):
+        passwords = (
+            'pa ss',
+            'pa"ss',
+            "pa#ss",
+            "pa/ss",
+            "pa:ss",
+            "pa?ss",
+            "pa@ss",
+            "pa[ss]",
+            "pa&ss",
+        )
+        for password in passwords:
+            with self.subTest(password=password):
+                url = (
+                    "postgresql://postgres."
+                    f"project:{password}@db.project.supabase.co:5432/postgres"
+                )
+
+                config = database_config(url, ssl_require=True)
+
+                self.assertEqual(config["HOST"], "db.project.supabase.co")
+                self.assertEqual(config["PORT"], 5432)
+                self.assertEqual(config["NAME"], "postgres")
+                self.assertEqual(config["PASSWORD"], password)
+
+    def test_bracketed_password_no_longer_breaks_url_parsing(self):
+        # CPython reads a raw '[' in the userinfo as an IPv6 literal.
+        url = "postgresql://postgres:pa[ss]word@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(
+            encode_url_password(url),
+            "postgresql://postgres:pa%5Bss%5Dword@db.project.supabase.co:5432/postgres",
+        )
+
+    def test_literal_percent_in_password_survives_parsing(self):
+        # A raw '%' would otherwise decode into a different password.
+        config = database_config(
+            "postgresql://postgres:pa%ss@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa%ss")
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+
+    def test_percent_with_brackets_is_encoded_once(self):
+        config = database_config(
+            "postgresql://postgres:pa[%]ss@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa[%]ss")
+
+    def test_password_encoding_is_idempotent(self):
+        url = "postgresql://postgres:pa[ss]%40word@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(
+            encode_url_password(encode_url_password(url)),
+            encode_url_password(url),
+        )
+
+    def test_already_encoded_password_is_not_double_encoded(self):
+        config = database_config(
+            "postgresql://postgres:pa%5Bss%5D%40word@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa[ss]@word")
+
+    def test_query_parameters_survive_password_encoding(self):
+        config = database_config(
+            "postgresql://postgres:pa[ss]@db.project.supabase.co:5432/postgres"
+            "?sslmode=require&connect_timeout=5",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+        self.assertEqual(config["PASSWORD"], "pa[ss]")
+
+    def test_url_without_password_is_unchanged(self):
+        url = "postgresql://postgres@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(encode_url_password(url), url)
+
+    def test_unparseable_url_reports_how_to_fix_it(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "Percent-encode"):
+            database_config(
+                "postgresql://postgres:secret@ho[st:5432/postgres",
+                ssl_require=True,
+            )
+
+
+class TestDatabaseIsolationTests(SimpleTestCase):
+    def test_test_suite_never_uses_the_configured_database(self):
+        # A Supabase URL in .env must not turn the test run into a client of
+        # the live project.
+        self.assertEqual(
+            settings.DATABASES["default"]["ENGINE"],
+            "django.db.backends.sqlite3",
+        )
+        self.assertEqual(base_settings.DATABASE_URL, "sqlite:///db.sqlite3")
 
 
 class ContentSecurityPolicyTests(TestCase):
