@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from storages.backends.s3 import S3Storage
@@ -126,3 +127,6 @@ class StaticFilesTests(SimpleTestCase):
             base_settings.STORAGES["staticfiles"]["BACKEND"],
             "whitenoise.storage.CompressedManifestStaticFilesStorage",
         )
+
+    def test_htmx_is_vendored(self):
+        self.assertIsNotNone(finders.find("js/htmx.min.js"))
