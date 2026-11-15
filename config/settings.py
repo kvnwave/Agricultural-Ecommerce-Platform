@@ -276,10 +276,52 @@ if SUPABASE_S3_ENDPOINT:
     }
 
 # Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
+# Local development prints messages to the console. Production must use SMTP;
+# allauth cannot verify addresses without it. Django 6.1 rejects the old
+# EMAIL_* SMTP settings alongside MAILERS, so these are plain locals.
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+smtp_host = os.getenv("EMAIL_HOST", "")
+smtp_port = int(os.getenv("EMAIL_PORT", "587"))
+smtp_user = os.getenv("EMAIL_HOST_USER", "")
+smtp_password = os.getenv("EMAIL_HOST_PASSWORD", "")
+smtp_use_tls = os.getenv("EMAIL_USE_TLS", "True").lower() in {"1", "true", "yes"}
+smtp_use_ssl = os.getenv("EMAIL_USE_SSL", "").lower() in {"1", "true", "yes"}
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
+
+if DEBUG:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.console.EmailBackend",
+        },
+    }
+else:
+    missing = [
+        name
+        for name, value in (
+            ("EMAIL_HOST", smtp_host),
+            ("DEFAULT_FROM_EMAIL", DEFAULT_FROM_EMAIL),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImproperlyConfigured(
+            f"{' and '.join(missing)} must be set when DEBUG is False."
+        )
+    if smtp_use_tls and smtp_use_ssl:
+        raise ImproperlyConfigured(
+            "EMAIL_USE_TLS and EMAIL_USE_SSL are mutually exclusive."
+        )
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "OPTIONS": {
+                "host": smtp_host,
+                "port": smtp_port,
+                "username": smtp_user,
+                "password": smtp_password,
+                "use_tls": smtp_use_tls,
+                "use_ssl": smtp_use_ssl,
+                "timeout": 10,
+            },
+        },
+    }
