@@ -150,8 +150,10 @@ static/          Built CSS
 ## Tests
 
 ```bash
-python manage.py test
+python manage.py test --settings=config.settings_test
 ```
+
+CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
 ## Deployment
 
