@@ -42,6 +42,7 @@ npm install
 
 cp .env.example .env             # then set SECRET_KEY and DEBUG=True
 python manage.py migrate
+python manage.py createcachetable
 python manage.py createsuperuser
 ```
 
@@ -156,12 +157,13 @@ python manage.py test
 2. Configure `EMAIL_HOST`, `DEFAULT_FROM_EMAIL`, and credentials. allauth sends verification links, so signup fails without working SMTP.
 3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
 4. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
-5. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
-6. Change the default `example.com` row in **Admin → Sites** to your domain.
-7. Run `npm run build` and `python manage.py collectstatic`.
-8. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
-9. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
-10. CSP starts in report-only mode (`SECURE_CSP_REPORT_ONLY`). Review reports from the marketplace, admin, and allauth pages, then copy the policy into `SECURE_CSP` to enforce it. Allauth’s email-management templates use inline JSON and style attributes, so verify those pages before enforcing.
+5. Create the shared cache table on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py createcachetable`. allauth's login throttles use it.
+6. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
+7. Change the default `example.com` row in **Admin → Sites** to your domain.
+8. Run `npm run build` and `python manage.py collectstatic`.
+9. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
+10. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
+11. CSP starts in report-only mode (`SECURE_CSP_REPORT_ONLY`). Review reports from the marketplace, admin, and allauth pages, then copy the policy into `SECURE_CSP` to enforce it. Allauth’s email-management templates use inline JSON and style attributes, so verify those pages before enforcing.
 
 ## Supabase Notes
 
