@@ -194,7 +194,7 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |
 | Cursor errors on Supabase | Run schema commands with `--settings=config.settings_direct` so they use `DIRECT_URL`, not the transaction pooler. |
 | `nodename nor servname provided` for the direct host | Supabase's direct connection is IPv6-only. Copy the **Session pooler** string (port 5432) into `DIRECT_URL` instead. |
-| `password authentication failed` on the pooler | The password in the URL is stale. Reset it in **Database settings**, then re-copy both connection strings. |
+| `password authentication failed` on the pooler | Check the password is not still wrapped in the `[ ]` from the connection-string placeholder, then reset it in **Database settings** and re-copy both strings. |
 | `does not appear to be an IPv4 or IPv6 address` | A password contains `[` or `]`. `config/database.py` percent-encodes reserved password characters, so update the app if this still appears. |
 | Uploaded photos missing after redeploy | Configure `SUPABASE_S3_*`. |
 | `zsh: no matches found` on a pip install with brackets | Quote the package name, e.g. `"psycopg[binary]"`. |
