@@ -1,3 +1,4 @@
+from datetime import timedelta
 from functools import wraps
 
 from django.contrib import messages
@@ -9,15 +10,64 @@ from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from accounts.models import Profile
+from accounts.models import Profile, User
 
 from .forms import ListingForm
 from .models import Category, Listing, ListingLike
 
 PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
 LISTINGS_PER_PAGE = 24
+SEARCH_QUERY_MAX_LENGTH = 100
+
+
+def with_likes_total(queryset):
+    """Annotate ``likes_total`` without joining the likes table.
+
+    ``Count("likes")`` adds a ``LEFT OUTER JOIN`` and ``GROUP BY``, which also
+    slows ``Paginator.count``. A correlated subquery keeps the count query on
+    the listings table alone.
+    """
+
+    return queryset.annotate(
+        likes_total=Coalesce(
+            Subquery(
+                ListingLike.objects.filter(listing=OuterRef("pk"))
+                .values("listing")
+                .annotate(total=Count("pk"))
+                .values("total"),
+                output_field=IntegerField(),
+            ),
+            0,
+        )
+    )
+
+
+def listing_limit_message(user):
+    """Return why ``user`` cannot create another listing, or ``None``.
+
+    Archived listings are excluded from the open cap but still count toward
+    the rolling daily creation limit.
+    """
+
+    open_count = user.listings.exclude(status=Listing.Status.ARCHIVED).count()
+    if open_count >= Listing.MAX_OPEN_LISTINGS:
+        return (
+            f"You can keep at most {Listing.MAX_OPEN_LISTINGS} open listings. "
+            "Archive or delete one before creating another."
+        )
+
+    created_today = user.listings.filter(
+        created_at__gte=timezone.now() - timedelta(days=1)
+    ).count()
+    if created_today >= Listing.MAX_LISTINGS_PER_DAY:
+        return (
+            f"You can create at most {Listing.MAX_LISTINGS_PER_DAY} listings "
+            "in 24 hours. Try again later."
+        )
+    return None
 
 
 def farmer_required(view_func):
@@ -40,11 +90,11 @@ def listings_view(request):
         Listing.objects.filter(status__in=PUBLIC_LISTING_STATUSES)
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .annotate(likes_total=Count("likes"))
         .order_by("-created_at")
     )
+    listings = with_likes_total(listings)
 
-    query = (request.GET.get("q") or "").strip()
+    query = (request.GET.get("q") or "").strip()[:SEARCH_QUERY_MAX_LENGTH]
     if query:
         listings = listings.filter(
             Q(title__icontains=query)
@@ -92,9 +142,11 @@ def listings_view(request):
 
 def listing_detail(request, public_id):
     listing = get_object_or_404(
-        Listing.objects.select_related("category", "farmer")
-        .prefetch_related("images")
-        .annotate(likes_total=Count("likes")),
+        with_likes_total(
+            Listing.objects.select_related("category", "farmer").prefetch_related(
+                "images"
+            )
+        ),
         public_id=public_id,
     )
 
@@ -164,25 +216,20 @@ def liked_listings(request):
         )
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .annotate(
-            likes_total=Coalesce(
-                Subquery(
-                    ListingLike.objects.filter(listing=OuterRef("pk"))
-                    .values("listing")
-                    .annotate(total=Count("pk"))
-                    .values("total"),
-                    output_field=IntegerField(),
-                ),
-                0,
-            )
-        )
         .order_by("-likes__created_at")
+    )
+    listings = with_likes_total(listings)
+    page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
+        request.GET.get("page")
     )
 
     return render(
         request,
         "listings/liked_listings.html",
-        {"listings": listings},
+        {
+            "page_obj": page_obj,
+            "listings": page_obj.object_list,
+        },
     )
 
 
@@ -190,13 +237,26 @@ def liked_listings(request):
 @farmer_required
 def listing_create(request):
     if request.method == "POST":
-        form = ListingForm(request.POST, request.FILES)
-        if form.is_valid():
-            form.instance.farmer = request.user
-            form.save()
-            messages.success(request, "Your listing has been created.")
-            return redirect("my_listings")
+        with transaction.atomic():
+            # Serialize creations per farmer so two concurrent requests cannot
+            # both pass the cap check and save.
+            User.objects.select_for_update().get(pk=request.user.pk)
+            limit_message = listing_limit_message(request.user)
+            if limit_message:
+                messages.error(request, limit_message)
+                return redirect("my_listings")
+
+            form = ListingForm(request.POST, request.FILES)
+            if form.is_valid():
+                form.instance.farmer = request.user
+                form.save()
+                messages.success(request, "Your listing has been created.")
+                return redirect("my_listings")
     else:
+        limit_message = listing_limit_message(request.user)
+        if limit_message:
+            messages.error(request, limit_message)
+            return redirect("my_listings")
         form = ListingForm()
 
     return render(
@@ -264,13 +324,18 @@ def listing_delete(request, public_id):
 @farmer_required
 def my_listings(request):
     listings = (
-        request.user.listings.prefetch_related("images")
-        .annotate(likes_total=Count("likes"))
-        .order_by("-created_at")
+        request.user.listings.select_related("category").order_by("-created_at")
+    )
+    listings = with_likes_total(listings)
+    page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
+        request.GET.get("page")
     )
 
     return render(
         request,
         "listings/my_listings.html",
-        {"listings": listings},
+        {
+            "page_obj": page_obj,
+            "listings": page_obj.object_list,
+        },
     )

@@ -12,9 +12,13 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 from dotenv import load_dotenv
+from PIL import Image
 
 from config.storage import supabase_storage_options
 
@@ -27,16 +31,33 @@ load_dotenv(BASE_DIR / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv',
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
+# SECURITY WARNING: keep the secret key used in production secret!
+INSECURE_DEV_SECRET_KEY = (
+    'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv'
+)
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set when DEBUG is False. "
+            "Generate one with: python -c \"from django.core.management.utils "
+            "import get_random_secret_key as k; print(k())\""
+        )
+    SECRET_KEY = INSECURE_DEV_SECRET_KEY
+elif not DEBUG and SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must not use the generated development key in production."
+    )
+
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+# Move the admin off the default path. Set a deployment-specific value and
+# restrict it at the proxy; obscurity alone is not access control.
+_admin_path = os.getenv("DJANGO_ADMIN_PATH", "control-panel/").strip("/")
+DJANGO_ADMIN_PATH = f"{_admin_path or 'control-panel'}/"
 
 # HTTPS deployments behind a proxy or custom domain need their public origin
 # trusted, otherwise Django rejects form posts as cross-site.
@@ -45,6 +66,27 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+# HTTPS and cookie security. Production is expected to sit behind a proxy that
+# terminates TLS. Trusting X-Forwarded-Proto is opt-in because the header is
+# client-controlled: if the proxy forwards it unchanged, a plain-HTTP request
+# can claim to be HTTPS, and Django will skip SECURE_SSL_REDIRECT.
+TRUST_X_FORWARDED_PROTO = os.getenv(
+    "TRUST_X_FORWARDED_PROTO", ""
+).lower() in {"1", "true", "yes"}
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    if TRUST_X_FORWARDED_PROTO:
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # One year. Subdomains and preload stay off until every subdomain is
+    # HTTPS-only: includeSubDomains breaks HTTP-only subdomains, and preload
+    # removal takes months.
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 365
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
 
 # Application definition
 
@@ -79,19 +121,40 @@ AUTH_USER_MODEL = 'accounts.User'
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
-    # Keeps Django admin password login and permission checks working.
-    'django.contrib.auth.backends.ModelBackend',
+    # Keeps Django admin password login and permission checks working, and
+    # loads the profile with the session user.
+    'accounts.backends.ProfileModelBackend',
     # Adds email-based login and resolves social accounts through allauth.
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
 # Users remember their email, not the internal username Django requires.
 ACCOUNT_LOGIN_METHODS = {'email'}
-ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_SIGNUP_FIELDS = ['username', 'email*', 'password1*', 'password2*']
 # Adds the buyer/farmer choice before allauth creates the account.
 ACCOUNT_FORMS = {'signup': 'accounts.forms.SignupForm'}
+# One username policy and generated fallback for email and social signup.
+ACCOUNT_ADAPTER = 'accounts.adapters.AccountAdapter'
+# First change is immediate; later changes wait this many days.
+USERNAME_CHANGE_COOLDOWN_DAYS = 7
 # Email is the account identifier, so an unverified address cannot log in.
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+# Make allauth's throttles explicit. The cache below is shared by every
+# process, so the limits hold across workers.
+ACCOUNT_RATE_LIMITS = {
+    'login': '30/m/ip',
+    'login_failed': '10/m/ip,5/5m/key',
+    'signup': '20/m/ip',
+    'reset_password': '20/m/ip,5/m/key',
+    'confirm_email': '1/180s/key',
+}
+# A database cache is shared by every worker and host, unlike locmem.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',
+    }
+}
 # Temporary landing page until the marketplace dashboard exists.
 LOGIN_REDIRECT_URL = '/listings/'
 
@@ -102,6 +165,7 @@ SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 # New social accounts must choose a role; the start endpoint stores it first.
 SOCIALACCOUNT_AUTO_SIGNUP = False
 SOCIALACCOUNT_FORMS = {'signup': 'accounts.forms.SocialSignupForm'}
+SOCIALACCOUNT_ADAPTER = 'accounts.adapters.SocialAccountAdapter'
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
@@ -120,6 +184,8 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -195,7 +261,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 
@@ -215,37 +281,114 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Bound how much pixel data Pillow will decode for one upload. Forms also
+# reject images above this before applying EXIF orientation.
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
+# A listing accepts five photos. Reject requests carrying more files before
+# Django stores them; the form still checks the per-listing total.
+DATA_UPLOAD_MAX_NUMBER_FILES = 10
+
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
+SUPABASE_S3_CUSTOM_DOMAIN = os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", "")
 # Public buckets get permanent object URLs; private buckets use signed URLs.
 SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
     "SUPABASE_S3_QUERYSTRING_AUTH", ""
 ).lower() in {"1", "true", "yes"}
 
-if SUPABASE_S3_ENDPOINT:
-    STORAGES = {
-        "default": {
-            "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": supabase_storage_options(
-                endpoint=SUPABASE_S3_ENDPOINT,
-                bucket=SUPABASE_BUCKET,
-                access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
-                secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
-                region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                custom_domain=os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", ""),
-                querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
-            ),
-        },
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-        },
-    }
-
-# Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+# WhiteNoise serves the collected, hashed CSS/JS in production. Only the
+# media backend changes when uploads move to Supabase.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+if SUPABASE_S3_ENDPOINT:
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": supabase_storage_options(
+            endpoint=SUPABASE_S3_ENDPOINT,
+            bucket=SUPABASE_BUCKET,
+            access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+            secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+            region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+            custom_domain=SUPABASE_S3_CUSTOM_DOMAIN,
+            querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
+        ),
+    }
+
+# Content Security Policy. Report-only until production reports show no
+# breakage; then copy this into SECURE_CSP to enforce it.
+csp_image_sources = [CSP.SELF, "https://*.googleusercontent.com"]
+if SUPABASE_S3_ENDPOINT:
+    csp_endpoint = urlparse(SUPABASE_S3_ENDPOINT)
+    csp_image_sources.append(f"{csp_endpoint.scheme}://{csp_endpoint.netloc}")
+if SUPABASE_S3_CUSTOM_DOMAIN:
+    csp_domain = SUPABASE_S3_CUSTOM_DOMAIN
+    if "://" not in csp_domain:
+        csp_domain = f"https://{csp_domain}"
+    csp_domain = urlparse(csp_domain)
+    csp_image_sources.append(f"{csp_domain.scheme}://{csp_domain.netloc}")
+
+SECURE_CSP_REPORT_ONLY = {
+    "default-src": [CSP.SELF],
+    "img-src": csp_image_sources,
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.SELF],
+}
+
+# Email
+# Local development prints messages to the console. Production must use SMTP;
+# allauth cannot verify addresses without it. Django 6.1 rejects the old
+# EMAIL_* SMTP settings alongside MAILERS, so these are plain locals.
+
+smtp_host = os.getenv("EMAIL_HOST", "")
+smtp_port = int(os.getenv("EMAIL_PORT", "587"))
+smtp_user = os.getenv("EMAIL_HOST_USER", "")
+smtp_password = os.getenv("EMAIL_HOST_PASSWORD", "")
+smtp_use_tls = os.getenv("EMAIL_USE_TLS", "True").lower() in {"1", "true", "yes"}
+smtp_use_ssl = os.getenv("EMAIL_USE_SSL", "").lower() in {"1", "true", "yes"}
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
+
+if DEBUG:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.console.EmailBackend",
+        },
+    }
+else:
+    missing = [
+        name
+        for name, value in (
+            ("EMAIL_HOST", smtp_host),
+            ("DEFAULT_FROM_EMAIL", DEFAULT_FROM_EMAIL),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImproperlyConfigured(
+            f"{' and '.join(missing)} must be set when DEBUG is False."
+        )
+    if smtp_use_tls and smtp_use_ssl:
+        raise ImproperlyConfigured(
+            "EMAIL_USE_TLS and EMAIL_USE_SSL are mutually exclusive."
+        )
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "OPTIONS": {
+                "host": smtp_host,
+                "port": smtp_port,
+                "username": smtp_user,
+                "password": smtp_password,
+                "use_tls": smtp_use_tls,
+                "use_ssl": smtp_use_ssl,
+                "timeout": 10,
+            },
+        },
+    }

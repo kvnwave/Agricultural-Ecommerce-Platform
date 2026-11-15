@@ -8,6 +8,7 @@
     - `user`: the signed-in account. Its profile is created by the post_save
       signal, so `user.profile` is safe on this authenticated page.
     - `form`: ProfileForm, currently containing the avatar upload field.
+    - `cooldown_ends`: when the next username change is allowed, or None.
 
     `user.profile.avatar_url` returns an uploaded photo first, then the Google
     picture, then an empty string. Other fields: `user.profile.role` /
@@ -20,6 +21,16 @@
       <div>
         <h1 class="text-h3 text-fg">{{ user.get_full_name|default:user.email }}</h1>
         <p class="text-fg/60">{{ user.email }}</p>
+        <p class="text-fg/60">
+          @{{ user.username }}
+          ·
+          <a href="{% url 'username_change' %}" class="underline">Change username</a>
+        </p>
+        {% if cooldown_ends %}
+          <p class="text-xs text-fg/60">
+            Next change: {{ cooldown_ends|date:"M j, Y" }}
+          </p>
+        {% endif %}
         <p class="text-fg/60">{{ user.profile.get_role_display }}</p>
       </div>
     </div>

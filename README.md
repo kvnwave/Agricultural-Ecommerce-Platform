@@ -40,8 +40,9 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 npm install
 
-cp .env.example .env             # then set SECRET_KEY
+cp .env.example .env             # then set SECRET_KEY and DEBUG=True
 python manage.py migrate
+python manage.py createcachetable
 python manage.py createsuperuser
 ```
 
@@ -63,13 +64,16 @@ npm run watch
 python manage.py runserver
 ```
 
-Open `http://127.0.0.1:8000/`. Admin is at `/admin/`.
+Open `http://127.0.0.1:8000/`. Admin is at `/control-panel/` by default; change it with `DJANGO_ADMIN_PATH`.
 
 Build CSS once without watching: `npm run build`.
 
 ## Environment Variables
 
-Copy `.env.example` to `.env`. Never commit `.env`.
+Copy `.env.example` to `.env`. Never commit `.env`. The example ships with
+production-safe defaults (`DEBUG=False`), so local development must set
+`DEBUG=True`; without it Django serves static files through WhiteNoise from
+`staticfiles/` after `collectstatic`, and expects a real mail server.
 
 Required for local development:
 
@@ -88,7 +92,21 @@ Optional:
 | `DIRECT_URL` | Direct Supabase connection, used for `migrate`. |
 | `DB_SSL_REQUIRE` | Force TLS for remote databases. |
 | `CSRF_TRUSTED_ORIGINS` | Public HTTPS origins, needed in production. |
+| `DJANGO_ADMIN_PATH` | Admin URL path. Defaults to `control-panel/`. |
+| `TRUST_X_FORWARDED_PROTO` | Trust the proxy's `X-Forwarded-Proto`. Enable only when the proxy overwrites it. |
 | `SUPABASE_S3_*`, `SUPABASE_BUCKET` | Supabase Storage. Without these, uploads go to `media/`. |
+
+### Email
+
+Local development prints email to the console. Production requires:
+
+| Variable | Purpose |
+| --- | --- |
+| `EMAIL_HOST` | SMTP hostname. |
+| `DEFAULT_FROM_EMAIL` | Sender address accepted by the provider. |
+| `EMAIL_PORT` | Defaults to `587`. |
+| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | SMTP credentials, if required. |
+| `EMAIL_USE_TLS`, `EMAIL_USE_SSL` | STARTTLS (default) or implicit TLS. Set only one. |
 
 ## Google Login
 
@@ -125,24 +143,36 @@ chat/            Placeholder
 analytics/       Placeholder
 notifications/   Placeholder
 templates/       HTML templates
-static/          Tailwind input and built CSS
+assets/          Tailwind source
+static/          Built CSS and vendored JavaScript
 ```
+
+`requirements-future.txt` pins infrastructure packages (Celery, Channels,
+Daphne) that the app does not import yet, so they stay out of the deployed
+environment until a feature needs them.
 
 ## Tests
 
 ```bash
-python manage.py test
+python manage.py test --settings=config.settings_test
 ```
+
+CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
 ## Deployment
 
-1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`.
-2. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
-3. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
-4. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
-5. Change the default `example.com` row in **Admin → Sites** to your domain.
-6. Run `npm run build` and `python manage.py collectstatic`.
-7. Run `python manage.py check --deploy`.
+1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
+2. Configure `EMAIL_HOST`, `DEFAULT_FROM_EMAIL`, and credentials. allauth sends verification links, so signup fails without working SMTP.
+3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
+4. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
+5. Create the shared cache table on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py createcachetable`. allauth's login throttles use it.
+6. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
+7. Change the default `example.com` row in **Admin → Sites** to your domain.
+8. Run `npm run build` and `python manage.py collectstatic --noinput`. WhiteNoise serves the hashed files from `staticfiles/`.
+9. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
+10. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
+11. CSP starts in report-only mode (`SECURE_CSP_REPORT_ONLY`). Review reports from the marketplace, admin, and allauth pages, then copy the policy into `SECURE_CSP` to enforce it. Allauth’s email-management templates use inline JSON and style attributes, so verify those pages before enforcing.
+12. Set `DJANGO_ADMIN_PATH` to a deployment-specific value and restrict that path at the proxy (IP allowlist or VPN). Django’s admin login is outside allauth’s rate limits, so the proxy is the throttle.
 
 ## Supabase Notes
 
