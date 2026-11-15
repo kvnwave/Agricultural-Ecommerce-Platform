@@ -177,7 +177,7 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 ## Supabase Notes
 
 - Supabase's direct connection (port 5432) is IPv6-only. On an IPv4-only network, use the **Session pooler** string for `DIRECT_URL`; it runs migrations fine.
-- Passwords with reserved characters (`[`, `]`, `#`, `/`, `:`, `?`, `@`, spaces) are percent-encoded by `config/database.py` before parsing, so a password copied verbatim from the dashboard still works.
+- Passwords with reserved characters (`[`, `]`, `#`, `/`, `:`, `?`, `@`, spaces) are percent-encoded by `config/database.py` before parsing, so a password copied verbatim from the dashboard still works. A literal `%` is escaped as well, while an existing `%XX` escape is left intact.
 - Django connects directly to Postgres. Disable the Supabase Data API, or revoke the `anon` and `authenticated` grants on `public`, so `accounts_user` is not exposed.
 - Never put the Supabase `service_role` key in Django.
 - Set `SUPABASE_S3_REGION` to the region shown in **Storage → S3 connection**. A wrong region causes `SignatureDoesNotMatch`.
