@@ -25,7 +25,11 @@ from PIL import Image
 from . import usernames
 from .adapters import AccountAdapter
 from .backends import ProfileModelBackend
-from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
+from .forms import (
+    ProfileForm,
+    SOCIAL_SIGNUP_ROLE_SESSION_KEY,
+    SocialSignupForm,
+)
 from .models import Profile, UsernameHistory, User
 
 
@@ -922,6 +926,45 @@ class AvatarTests(TestCase):
         self.user.profile.refresh_from_db()
         self.assertTrue(self.user.profile.avatar)
         self.assertTrue(Path(self.user.profile.avatar.path).exists())
+
+    def test_replacing_avatar_deletes_the_old_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        old_name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        form = ProfileForm(
+            data={},
+            files={
+                "avatar": SimpleUploadedFile(
+                    "new.png", image_bytes(), content_type="image/png"
+                )
+            },
+            instance=profile,
+        )
+
+        self.assertTrue(form.is_valid())
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = form.save()
+
+        self.assertNotEqual(profile.avatar.name, old_name)
+        self.assertFalse(storage.exists(old_name))
+        self.assertTrue(storage.exists(profile.avatar.name))
+
+    def test_clearing_avatar_deletes_the_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        old_name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        form = ProfileForm(data={"avatar-clear": "on"}, instance=profile)
+
+        self.assertTrue(form.is_valid())
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = form.save()
+
+        self.assertFalse(profile.avatar)
+        self.assertFalse(storage.exists(old_name))
 
     def test_profile_view_rejects_non_image(self):
         self.client.force_login(self.user)
