@@ -394,6 +394,83 @@ class UsernameChangeTests(TestCase):
         self.assertEqual(self.user.username, "old_handle")
 
 
+class AdminUsernameChangeTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.admin_user = User.objects.create_superuser(
+            "support-admin",
+            email="admin@example.com",
+            password=self.password,
+        )
+        self.user = User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password=self.password,
+        )
+        self.model_admin = admin.site._registry[User]
+        self.request = RequestFactory().post("/admin/accounts/user/")
+        self.request.user = self.admin_user
+
+    def test_admin_form_rejects_invalid_handles(self):
+        form = self.model_admin.form(instance=self.user)
+
+        form.cleaned_data = {"username": "support"}
+        with self.assertRaisesMessage(ValidationError, "reserved"):
+            form.clean_username()
+
+        User.objects.create_user(
+            "taken_handle",
+            email="taken@example.com",
+            password=self.password,
+        )
+        form.cleaned_data = {"username": "Taken_Handle"}
+        with self.assertRaisesMessage(ValidationError, "already taken"):
+            form.clean_username()
+
+    def test_admin_change_logs_history_and_resets_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=1)
+        self.user.save(update_fields=["username_changed_at"])
+
+        obj = User.objects.get(pk=self.user.pk)
+        obj.username = "jane_grows"
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "jane_grows")
+        self.assertGreater(
+            self.user.username_changed_at,
+            timezone.now() - timedelta(seconds=5),
+        )
+
+        entry = UsernameHistory.objects.get(user=self.user)
+        self.assertEqual(entry.old_username, "farmer_jane")
+        self.assertEqual(entry.new_username, "jane_grows")
+        self.assertEqual(entry.changed_by, self.admin_user)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.ADMIN)
+
+    def test_admin_change_bypasses_active_cooldown(self):
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["username_changed_at"])
+
+        obj = User.objects.get(pk=self.user.pk)
+        obj.username = "admin_override"
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "admin_override")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_admin_save_without_username_change_does_not_log(self):
+        obj = User.objects.get(pk=self.user.pk)
+
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.assertFalse(UsernameHistory.objects.exists())
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.username_changed_at)
+
+
 class AuthPageTests(TestCase):
     def test_auth_pages_render(self):
         pages = {
