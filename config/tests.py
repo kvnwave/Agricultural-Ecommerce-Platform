@@ -1,6 +1,10 @@
-from django.test import SimpleTestCase
+from django.conf import settings
+from django.contrib.staticfiles import finders
+from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 from storages.backends.s3 import S3Storage
 
+from config import settings as base_settings
 from config.storage import supabase_storage_options
 
 
@@ -82,3 +86,51 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
     def test_invalid_endpoint_is_rejected(self):
         with self.assertRaises(ValueError):
             self.make_options(endpoint="not-a-url")
+
+
+class ContentSecurityPolicyTests(TestCase):
+    def test_marketplace_sends_report_only_policy(self):
+        response = self.client.get(reverse("listings"))
+
+        policy = response.headers["Content-Security-Policy-Report-Only"]
+
+        self.assertIn("default-src 'self'", policy)
+        self.assertIn(
+            "img-src 'self' https://*.googleusercontent.com",
+            policy,
+        )
+        self.assertIn("object-src 'none'", policy)
+        self.assertIn("base-uri 'self'", policy)
+        self.assertNotIn("Content-Security-Policy", response.headers)
+
+
+class AdminPathTests(SimpleTestCase):
+    def test_admin_is_not_at_the_default_path(self):
+        self.assertNotEqual(settings.DJANGO_ADMIN_PATH, "admin/")
+        self.assertEqual(
+            reverse("admin:index"),
+            f"/{settings.DJANGO_ADMIN_PATH}",
+        )
+
+
+class StaticFilesTests(SimpleTestCase):
+    def test_whitenoise_follows_security_middleware(self):
+        middleware = settings.MIDDLEWARE
+
+        self.assertEqual(
+            middleware.index("whitenoise.middleware.WhiteNoiseMiddleware"),
+            middleware.index("django.middleware.security.SecurityMiddleware") + 1,
+        )
+
+    def test_static_files_use_compressed_manifest_storage(self):
+        self.assertEqual(
+            base_settings.STORAGES["staticfiles"]["BACKEND"],
+            "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        )
+
+    def test_htmx_is_vendored(self):
+        self.assertIsNotNone(finders.find("js/htmx.min.js"))
+
+    def test_timezone_is_manila(self):
+        self.assertEqual(settings.TIME_ZONE, "Asia/Manila")
+        self.assertTrue(settings.USE_TZ)

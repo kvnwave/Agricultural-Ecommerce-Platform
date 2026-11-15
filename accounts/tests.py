@@ -1,6 +1,7 @@
 import io
 import shutil
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -9,17 +10,27 @@ from allauth.core import context as allauth_context
 from allauth.socialaccount.forms import SignupForm as AllauthSocialSignupForm
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.conf import settings
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 
-from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
-from .models import Profile, User
+from . import usernames
+from .adapters import AccountAdapter
+from .backends import ProfileModelBackend
+from .forms import (
+    ProfileForm,
+    SOCIAL_SIGNUP_ROLE_SESSION_KEY,
+    SocialSignupForm,
+)
+from .models import Profile, UsernameHistory, User
 
 
 def image_bytes():
@@ -54,6 +65,443 @@ class UserModelTests(TestCase):
                     "second", email="same@example.com", password="temporary-pass-1"
                 )
 
+    def test_username_changed_at_starts_empty(self):
+        user = User.objects.create_user(
+            "never-changed",
+            email="never@example.com",
+            password="temporary-pass-1",
+        )
+
+        self.assertIsNone(user.username_changed_at)
+
+    def test_case_only_duplicate_username_is_rejected(self):
+        User.objects.create_user(
+            "CaseUser",
+            email="first-case@example.com",
+            password="temporary-pass-1",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                User.objects.create_user(
+                    "caseuser",
+                    email="second-case@example.com",
+                    password="temporary-pass-1",
+                )
+
+
+class ProfileModelBackendTests(TestCase):
+    def test_session_user_loads_profile_in_the_same_query(self):
+        user = User.objects.create_user(
+            "backend-user",
+            email="backend@example.com",
+            password="temporary-pass-1",
+        )
+        user.profile.role = Profile.Role.FARMER
+        user.profile.save(update_fields=["role"])
+
+        loaded = ProfileModelBackend().get_user(user.pk)
+
+        self.assertEqual(loaded.pk, user.pk)
+        with self.assertNumQueries(0):
+            self.assertEqual(loaded.profile.role, Profile.Role.FARMER)
+
+    def test_inactive_user_is_rejected(self):
+        user = User.objects.create_user(
+            "inactive-user",
+            email="inactive@example.com",
+            password="temporary-pass-1",
+            is_active=False,
+        )
+
+        self.assertIsNone(ProfileModelBackend().get_user(user.pk))
+
+
+class UsernameHistoryTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password=self.password,
+        )
+        self.admin_user = User.objects.create_superuser(
+            "support-admin",
+            email="admin@example.com",
+            password=self.password,
+        )
+
+    def test_history_records_old_and_new_handles(self):
+        entry = UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+            changed_by=self.admin_user,
+            reason=UsernameHistory.Reason.USER,
+        )
+
+        self.assertEqual(str(entry), "farmer_jane -> jane_grows")
+        self.assertEqual(list(self.user.username_history.all()), [entry])
+
+    def test_deleting_user_removes_history(self):
+        UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+        )
+
+        self.user.delete()
+
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_deleting_actor_keeps_history(self):
+        entry = UsernameHistory.objects.create(
+            user=self.user,
+            old_username="farmer_jane",
+            new_username="jane_grows",
+            changed_by=self.admin_user,
+            reason=UsernameHistory.Reason.ADMIN,
+        )
+
+        self.admin_user.delete()
+        entry.refresh_from_db()
+
+        self.assertIsNone(entry.changed_by)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.ADMIN)
+
+    def test_history_admin_is_read_only(self):
+        model_admin = admin.site._registry[UsernameHistory]
+        request = RequestFactory().get("/admin/")
+        request.user = self.admin_user
+
+        self.assertFalse(model_admin.has_add_permission(request))
+        self.assertFalse(model_admin.has_change_permission(request))
+        self.assertFalse(model_admin.has_delete_permission(request))
+
+
+class UsernamePolicyTests(TestCase):
+    def test_normalizes_case_and_whitespace(self):
+        self.assertEqual(
+            usernames.normalize_username("  Farmer_Jane "),
+            "farmer_jane",
+        )
+
+    def test_accepts_valid_handles(self):
+        for value in ("farmer_jane", "a1b", "user-1234abcd", "x" * 30):
+            with self.subTest(value=value):
+                self.assertEqual(usernames.validate_username(value), value)
+
+    def test_rejects_lengths_outside_bounds(self):
+        for value in ("ab", "x" * 31):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(
+                    ValidationError, "between 3 and 30"
+                ):
+                    usernames.validate_username(value)
+
+    def test_rejects_invalid_characters_and_edges(self):
+        values = (
+            "-farmer",
+            "farmer-",
+            "farmer jane",
+            "farmer@example.com",
+            "fármer",
+            "farmer.jane",
+            "farmer+name",
+        )
+
+        for value in values:
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    usernames.validate_username(value)
+
+    def test_rejects_reserved_names_case_insensitively(self):
+        for value in ("Admin", "SUPPORT", "marketplace"):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValidationError, "reserved"):
+                    usernames.validate_username(value)
+
+
+class GeneratedUsernameTests(TestCase):
+    def test_generated_handle_follows_policy_and_skips_collisions(self):
+        User.objects.create_user(
+            "user-deadbeef",
+            email="taken@example.com",
+            password="temporary-pass-1",
+        )
+
+        with mock.patch(
+            "accounts.usernames.secrets.token_hex",
+            side_effect=["deadbeef", "cafebabe"],
+        ):
+            handle = usernames.generate_username()
+
+        self.assertEqual(handle, "user-cafebabe")
+        self.assertEqual(usernames.validate_username(handle), handle)
+
+
+class AccountAdapterTests(TestCase):
+    def test_clean_username_normalizes_and_accepts(self):
+        self.assertEqual(
+            AccountAdapter().clean_username("  Farmer_Jane "),
+            "farmer_jane",
+        )
+
+    def test_clean_username_rejects_taken_handle_ignoring_case(self):
+        User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password="temporary-pass-1",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "already taken"):
+            AccountAdapter().clean_username("Farmer_Jane")
+
+    def test_clean_username_shallow_skips_uniqueness(self):
+        User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password="temporary-pass-1",
+        )
+
+        self.assertEqual(
+            AccountAdapter().clean_username("Farmer_Jane", shallow=True),
+            "farmer_jane",
+        )
+
+    def test_generate_unique_username_uses_neutral_handle(self):
+        with mock.patch(
+            "accounts.adapters.usernames.generate_username",
+            return_value="user-1a2b3c4d",
+        ) as generate:
+            handle = AccountAdapter().generate_unique_username(
+                ["Jane", "jane@example.com"]
+            )
+
+        self.assertEqual(handle, "user-1a2b3c4d")
+        generate.assert_called_once_with()
+
+
+class UsernameChangeTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "old_handle",
+            email="user@example.com",
+            password=self.password,
+        )
+        self.client.force_login(self.user)
+
+    def test_requires_login(self):
+        self.client.logout()
+
+        response = self.client.get(reverse("username_change"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('account_login')}?next={reverse('username_change')}",
+        )
+
+    def test_page_shows_current_username_and_form(self):
+        response = self.client.get(reverse("username_change"))
+
+        self.assertContains(response, "old_handle")
+        self.assertContains(response, "Save username")
+
+    def test_profile_shows_username_and_cooldown(self):
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.get(reverse("profile"))
+
+        self.assertContains(response, "@old_handle")
+        self.assertContains(response, "Next change")
+
+    def test_first_change_is_immediate_and_creates_history(self):
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": " Farmer_Jane "},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "farmer_jane")
+        self.assertIsNotNone(self.user.username_changed_at)
+
+        entry = UsernameHistory.objects.get(user=self.user)
+        self.assertEqual(entry.old_username, "old_handle")
+        self.assertEqual(entry.new_username, "farmer_jane")
+        self.assertEqual(entry.changed_by, self.user)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.USER)
+
+    def test_second_change_waits_for_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=1)
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "too_soon"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You can change your username again on")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_change_is_allowed_after_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=8)
+        self.user.save(update_fields=["username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "allowed_now"},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "allowed_now")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_staff_bypass_cooldown(self):
+        self.user.is_staff = True
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["is_staff", "username_changed_at"])
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "staff_handle"},
+        )
+
+        self.assertRedirects(response, reverse("profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "staff_handle")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_rejects_same_username(self):
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "OLD_HANDLE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That is already your username.")
+        self.assertFalse(UsernameHistory.objects.exists())
+
+    def test_rejects_duplicate_username(self):
+        User.objects.create_user(
+            "taken_handle",
+            email="taken@example.com",
+            password=self.password,
+        )
+
+        response = self.client.post(
+            reverse("username_change"),
+            {"username": "Taken_Handle"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is already taken.")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
+
+    def test_rejects_invalid_and_reserved_usernames(self):
+        cases = (
+            ("bad name", "Start and end with a letter or number."),
+            ("support", "That username is reserved."),
+        )
+
+        for value, message in cases:
+            with self.subTest(value=value):
+                response = self.client.post(
+                    reverse("username_change"),
+                    {"username": value},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, message)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "old_handle")
+
+
+class AdminUsernameChangeTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.admin_user = User.objects.create_superuser(
+            "support-admin",
+            email="admin@example.com",
+            password=self.password,
+        )
+        self.user = User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password=self.password,
+        )
+        self.model_admin = admin.site._registry[User]
+        self.request = RequestFactory().post("/admin/accounts/user/")
+        self.request.user = self.admin_user
+
+    def test_admin_form_rejects_invalid_handles(self):
+        form = self.model_admin.form(instance=self.user)
+
+        form.cleaned_data = {"username": "support"}
+        with self.assertRaisesMessage(ValidationError, "reserved"):
+            form.clean_username()
+
+        User.objects.create_user(
+            "taken_handle",
+            email="taken@example.com",
+            password=self.password,
+        )
+        form.cleaned_data = {"username": "Taken_Handle"}
+        with self.assertRaisesMessage(ValidationError, "already taken"):
+            form.clean_username()
+
+    def test_admin_change_logs_history_and_resets_cooldown(self):
+        self.user.username_changed_at = timezone.now() - timedelta(days=1)
+        self.user.save(update_fields=["username_changed_at"])
+
+        obj = User.objects.get(pk=self.user.pk)
+        obj.username = "jane_grows"
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "jane_grows")
+        self.assertGreater(
+            self.user.username_changed_at,
+            timezone.now() - timedelta(seconds=5),
+        )
+
+        entry = UsernameHistory.objects.get(user=self.user)
+        self.assertEqual(entry.old_username, "farmer_jane")
+        self.assertEqual(entry.new_username, "jane_grows")
+        self.assertEqual(entry.changed_by, self.admin_user)
+        self.assertEqual(entry.reason, UsernameHistory.Reason.ADMIN)
+
+    def test_admin_change_bypasses_active_cooldown(self):
+        self.user.username_changed_at = timezone.now()
+        self.user.save(update_fields=["username_changed_at"])
+
+        obj = User.objects.get(pk=self.user.pk)
+        obj.username = "admin_override"
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "admin_override")
+        self.assertEqual(UsernameHistory.objects.count(), 1)
+
+    def test_admin_save_without_username_change_does_not_log(self):
+        obj = User.objects.get(pk=self.user.pk)
+
+        self.model_admin.save_model(self.request, obj, form=None, change=True)
+
+        self.assertFalse(UsernameHistory.objects.exists())
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.username_changed_at)
+
 
 class AuthPageTests(TestCase):
     def test_auth_pages_render(self):
@@ -80,6 +528,92 @@ class SignupFlowTests(TestCase):
         self.assertContains(response, "Buyer")
         self.assertContains(response, "Farmer")
 
+    def test_signup_page_shows_optional_username_field(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertContains(response, "Username (optional)")
+        self.assertContains(response, "Leave blank and we")
+
+    def test_signup_uses_preferred_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "  Farm_Shop ",
+                "email": "preferred@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("account_email_verification_sent"),
+            fetch_redirect_response=False,
+        )
+        user = User.objects.get(email="preferred@example.com")
+        self.assertEqual(user.username, "farm_shop")
+
+    def test_signup_rejects_invalid_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "not a username",
+                "email": "invalid-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Start and end with a letter or number.")
+        self.assertFalse(
+            User.objects.filter(email="invalid-handle@example.com").exists()
+        )
+
+    def test_signup_rejects_duplicate_username_ignoring_case(self):
+        User.objects.create_user(
+            "farm_shop",
+            email="existing@example.com",
+            password=self.password,
+        )
+
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "FARM_SHOP",
+                "email": "duplicate-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is already taken.")
+        self.assertFalse(
+            User.objects.filter(email="duplicate-handle@example.com").exists()
+        )
+
+    def test_signup_rejects_reserved_username(self):
+        response = self.client.post(
+            reverse("account_signup"),
+            {
+                "role": Profile.Role.BUYER,
+                "username": "Support",
+                "email": "reserved-handle@example.com",
+                "password1": self.password,
+                "password2": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That username is reserved.")
+        self.assertFalse(
+            User.objects.filter(email="reserved-handle@example.com").exists()
+        )
+
     def test_signup_creates_user_profile_and_verification_email(self):
         response = self.client.post(
             reverse("account_signup"),
@@ -98,6 +632,7 @@ class SignupFlowTests(TestCase):
         )
 
         user = User.objects.get(email="new@example.com")
+        self.assertRegex(user.username, r"^user-[0-9a-f]{8}$")
         self.assertEqual(user.profile.role, Profile.Role.BUYER)
         self.assertFalse(user.emailaddress_set.get(email=user.email).verified)
         self.assertEqual(len(mail.outbox), 1)
@@ -206,6 +741,23 @@ class SocialSignupRoleTests(TestCase):
 
         self.assertTrue(form.fields["role"].required)
         self.assertIsNone(form.fields["role"].initial)
+
+    def test_social_form_username_is_optional_and_scoped(self):
+        form = SocialSignupForm(sociallogin=self.sociallogin())
+
+        field = form.fields["username"]
+        self.assertFalse(field.required)
+        self.assertEqual(field.max_length, 30)
+        self.assertIn("Leave blank", field.help_text)
+
+    def test_social_form_clears_provider_username_prefill(self):
+        sociallogin = SocialLogin(
+            user=User(username="Social Person", email="social@example.com")
+        )
+
+        form = SocialSignupForm(sociallogin=sociallogin)
+
+        self.assertEqual(form.initial["username"], "")
 
     def test_social_form_prefills_role_from_session(self):
         request = RequestFactory().get("/")
@@ -374,6 +926,45 @@ class AvatarTests(TestCase):
         self.user.profile.refresh_from_db()
         self.assertTrue(self.user.profile.avatar)
         self.assertTrue(Path(self.user.profile.avatar.path).exists())
+
+    def test_replacing_avatar_deletes_the_old_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        old_name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        form = ProfileForm(
+            data={},
+            files={
+                "avatar": SimpleUploadedFile(
+                    "new.png", image_bytes(), content_type="image/png"
+                )
+            },
+            instance=profile,
+        )
+
+        self.assertTrue(form.is_valid())
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = form.save()
+
+        self.assertNotEqual(profile.avatar.name, old_name)
+        self.assertFalse(storage.exists(old_name))
+        self.assertTrue(storage.exists(profile.avatar.name))
+
+    def test_clearing_avatar_deletes_the_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        old_name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        form = ProfileForm(data={"avatar-clear": "on"}, instance=profile)
+
+        self.assertTrue(form.is_valid())
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = form.save()
+
+        self.assertFalse(profile.avatar)
+        self.assertFalse(storage.exists(old_name))
 
     def test_profile_view_rejects_non_image(self):
         self.client.force_login(self.user)

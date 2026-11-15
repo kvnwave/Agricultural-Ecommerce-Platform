@@ -1,11 +1,74 @@
+import io
 import logging
+from pathlib import Path
 
 from django import forms
+from django.core.files.base import ContentFile
 from django.db import transaction
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .models import Listing, ListingImage
 
 logger = logging.getLogger(__name__)
+
+# Only formats the marketplace re-encodes cleanly. Rejecting the rest keeps
+# stored files free of EXIF and other embedded metadata.
+IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
+IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _scrub_image(upload):
+    """Re-encode an upload so EXIF, GPS, and other metadata are dropped."""
+
+    try:
+        with Image.open(upload) as source:
+            image_format = source.format
+            if image_format not in IMAGE_FORMATS:
+                raise forms.ValidationError(
+                    "Upload a JPEG, PNG, or WebP photo."
+                )
+            max_pixels = Image.MAX_IMAGE_PIXELS
+            if (
+                max_pixels is not None
+                and source.width * source.height > max_pixels
+            ):
+                raise forms.ValidationError(
+                    "This photo is too large to process. "
+                    f"Use an image under {max_pixels // 1_000_000} megapixels."
+                )
+
+            image = ImageOps.exif_transpose(source)
+            if image_format == "JPEG":
+                image = image.convert("RGB")
+            elif image_format == "PNG":
+                if image.mode not in ("RGB", "RGBA", "L", "LA", "P"):
+                    image = image.convert("RGBA")
+            elif image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGBA")
+
+            output = io.BytesIO()
+            options = {"optimize": True}
+            if image_format in {"JPEG", "WEBP"}:
+                options["quality"] = 90
+            image.save(output, format=image_format, **options)
+    except forms.ValidationError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+    ) as exc:
+        raise forms.ValidationError(
+            "Upload a valid JPEG, PNG, or WebP photo."
+        ) from exc
+
+    data = output.getvalue()
+    if len(data) > MAX_IMAGE_BYTES:
+        raise forms.ValidationError("Each photo must be smaller than 5 MB.")
+    stem = Path(upload.name).stem or "photo"
+    return ContentFile(data, name=f"{stem}{IMAGE_SUFFIXES[image_format]}")
 
 
 class MultipleFileInput(forms.FileInput):
@@ -30,6 +93,17 @@ class MultipleImageField(forms.ImageField):
                 self.error_messages["required"],
                 code="required",
             )
+        # Count and size come first: Pillow must not parse files the request
+        # would reject anyway.
+        if len(data) > Listing.MAX_IMAGES:
+            raise forms.ValidationError(
+                f"Add at most {Listing.MAX_IMAGES} photos."
+            )
+        for item in data:
+            if item.size > MAX_IMAGE_BYTES:
+                raise forms.ValidationError(
+                    "Each photo must be smaller than 5 MB."
+                )
 
         return [super().clean(item, initial=None) for item in data]
 
@@ -97,10 +171,7 @@ class ListingForm(forms.ModelForm):
 
     def clean_images(self):
         images = self.cleaned_data.get("images") or []
-        for image in images:
-            if image.size > 5 * 1024 * 1024:
-                raise forms.ValidationError("Each photo must be smaller than 5 MB.")
-        return images
+        return [_scrub_image(image) for image in images]
 
     def clean(self):
         cleaned_data = super().clean()

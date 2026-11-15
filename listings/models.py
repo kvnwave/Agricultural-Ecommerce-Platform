@@ -35,6 +35,9 @@ class Listing(models.Model):
     """Produce offered by a farmer, shaped after a marketplace listing."""
 
     MAX_IMAGES = 5
+    # Bound how much a single account can publish and how fast it can create.
+    MAX_OPEN_LISTINGS = 25
+    MAX_LISTINGS_PER_DAY = 10
 
     class Condition(models.TextChoices):
         FRESH = "fresh", "Fresh Harvest"
@@ -135,6 +138,10 @@ class Listing(models.Model):
             models.Index(
                 fields=["category", "status", "-created_at"],
                 name="listing_cat_status_created_idx",
+            ),
+            models.Index(
+                fields=["status", "-created_at"],
+                name="listing_status_created_idx",
             ),
         ]
         constraints = [

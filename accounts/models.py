@@ -4,6 +4,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models.functions import Lower
 
 
 def avatar_upload_path(instance, filename):
@@ -16,6 +17,54 @@ class User(AbstractUser):
     """Django admin and permissions assume a username; allauth logs in by email."""
 
     email = models.EmailField(unique=True)
+    # None means the user has never changed their handle, so the first change
+    # is immediate and the cooldown starts after it.
+    username_changed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower("username"),
+                name="accounts_user_username_ci_unique",
+            ),
+        ]
+
+
+class UsernameHistory(models.Model):
+    """Audit trail for support: who held which handle, and when."""
+
+    class Reason(models.TextChoices):
+        USER = "user", "User"
+        ADMIN = "admin", "Admin"
+        MIGRATION = "migration", "Migration"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="username_history",
+    )
+    old_username = models.CharField(max_length=150, db_index=True)
+    new_username = models.CharField(max_length=150)
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="username_changes_made",
+    )
+    reason = models.CharField(
+        max_length=10,
+        choices=Reason.choices,
+        default=Reason.USER,
+    )
+
+    class Meta:
+        ordering = ["-changed_at"]
+        verbose_name_plural = "username history"
+
+    def __str__(self):
+        return f"{self.old_username} -> {self.new_username}"
 
 
 class Profile(models.Model):

@@ -2,6 +2,7 @@ import io
 import shutil
 import tempfile
 import uuid
+import warnings
 from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
@@ -10,9 +11,10 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.storage import storages
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
@@ -21,6 +23,7 @@ from accounts.models import Profile, User
 
 from .forms import ListingForm
 from .models import Category, Listing, ListingImage, ListingLike
+from .views import LISTINGS_PER_PAGE, SEARCH_QUERY_MAX_LENGTH
 
 
 def image_bytes():
@@ -35,6 +38,21 @@ def uploaded_image(filename="photo.png"):
         image_bytes(),
         content_type="image/png",
     )
+
+
+def gps_jpeg_bytes():
+    """A sideways JPEG carrying GPS coordinates in EXIF."""
+
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Rotate 90 degrees clockwise when displayed.
+    gps = exif.get_ifd(0x8825)
+    gps[1] = "N"
+    gps[2] = (14.0, 35.0, 0.0)
+    gps[3] = "E"
+    gps[4] = (120.0, 58.0, 0.0)
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 10), "green").save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
 
 
 def create_farmer(username="farmer"):
@@ -426,6 +444,74 @@ class ListingFormTests(TestCase):
 
         self.assertTrue(form.is_valid(), form.errors)
 
+    def test_upload_strips_exif_gps_and_applies_orientation(self):
+        upload = SimpleUploadedFile(
+            "farm.jpg",
+            gps_jpeg_bytes(),
+            content_type="image/jpeg",
+        )
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        listing = form.save()
+        stored = listing.images.get()
+
+        with stored.image.open("rb") as file:
+            with Image.open(file) as saved:
+                self.assertEqual(saved.size, (10, 20))
+                self.assertEqual(dict(saved.getexif()), {})
+                self.assertEqual(dict(saved.getexif().get_ifd(0x8825)), {})
+
+    def test_upload_rejects_unsupported_image_formats(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (20, 20), "green").save(buffer, format="BMP")
+        upload = SimpleUploadedFile(
+            "farm.bmp",
+            buffer.getvalue(),
+            content_type="image/bmp",
+        )
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("JPEG, PNG, or WebP", form.errors["images"][0])
+
+    def test_upload_extension_matches_detected_format(self):
+        upload = SimpleUploadedFile(
+            "farm.png",
+            gps_jpeg_bytes(),
+            content_type="image/png",
+        )
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        listing = form.save()
+
+        self.assertTrue(listing.images.get().image.name.endswith(".jpg"))
+
+    def test_upload_rejects_images_over_pixel_limit(self):
+        with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 300):
+            form = ListingForm(
+                data=self.valid_data(),
+                files={"images": [uploaded_image()]},
+            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                self.assertFalse(form.is_valid())
+
+        self.assertIn("too large", form.errors["images"][0])
+
     def test_create_rejects_more_than_five_photos(self):
         form = ListingForm(
             data=self.valid_data(),
@@ -438,6 +524,39 @@ class ListingFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("images", form.errors)
+
+    def test_too_many_photos_rejected_before_image_validation(self):
+        files = [
+            SimpleUploadedFile(
+                f"broken-{index}.png",
+                b"not an image",
+                content_type="image/png",
+            )
+            for index in range(6)
+        ]
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": files},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Add at most 5 photos.", form.errors["images"][0])
+
+    def test_oversized_photo_rejected_before_image_validation(self):
+        upload = SimpleUploadedFile(
+            "huge.png",
+            b"x" * (5 * 1024 * 1024 + 1),
+            content_type="image/png",
+        )
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("smaller than 5 MB", form.errors["images"][0])
 
     def test_free_listing_needs_no_price(self):
         form = ListingForm(
@@ -656,6 +775,19 @@ class ListingViewTests(TestCase):
             position=listing.images.count(),
         )
 
+    def create_listings(self, count, status=Listing.Status.ACTIVE):
+        Listing.objects.bulk_create(
+            Listing(
+                farmer=self.farmer,
+                category=self.category,
+                title=f"Bulk listing {index}",
+                description="Bulk listing.",
+                price=Decimal("10.00"),
+                status=status,
+            )
+            for index in range(count)
+        )
+
     def valid_data(self, **overrides):
         data = {
             "title": "Fresh tomatoes",
@@ -700,6 +832,67 @@ class ListingViewTests(TestCase):
         listing = Listing.objects.get(title="Fresh tomatoes")
         self.assertEqual(listing.farmer, self.farmer)
         self.assertEqual(listing.images.count(), 1)
+
+    def test_create_page_redirects_when_open_listing_limit_is_reached(self):
+        self.create_listings(Listing.MAX_OPEN_LISTINGS - 1)
+        Listing.objects.filter(farmer=self.farmer).update(
+            created_at=timezone.now() - timedelta(days=2)
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(reverse("listing_create"), follow=True)
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "Archive or delete one")
+
+    def test_create_is_blocked_when_open_listing_limit_is_reached(self):
+        self.create_listings(Listing.MAX_OPEN_LISTINGS - 1)
+        Listing.objects.filter(farmer=self.farmer).update(
+            created_at=timezone.now() - timedelta(days=2)
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            {
+                **self.valid_data(),
+                "images": uploaded_image("cover.png"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "Archive or delete one")
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
+
+    def test_create_is_blocked_after_daily_limit(self):
+        self.create_listings(
+            Listing.MAX_LISTINGS_PER_DAY - 1,
+            status=Listing.Status.ARCHIVED,
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            {
+                **self.valid_data(),
+                "images": uploaded_image("cover.png"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "in 24 hours")
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
 
     def test_create_rejects_listing_without_photo(self):
         self.client.force_login(self.farmer)
@@ -794,6 +987,41 @@ class ListingViewTests(TestCase):
 
         self.assertContains(response, "Sold out")
         self.assertContains(response, "Back in stock Friday.")
+
+    def test_my_listings_paginates(self):
+        self.create_listings(LISTINGS_PER_PAGE)
+        self.client.force_login(self.farmer)
+
+        first_page = self.client.get(reverse("my_listings"))
+        second_page = self.client.get(reverse("my_listings"), {"page": 2})
+
+        self.assertEqual(
+            first_page.context["page_obj"].paginator.count,
+            LISTINGS_PER_PAGE + 1,
+        )
+        self.assertEqual(
+            len(first_page.context["listings"]),
+            LISTINGS_PER_PAGE,
+        )
+        self.assertEqual(len(second_page.context["listings"]), 1)
+        self.assertContains(first_page, "Page 1 of 2")
+        self.assertContains(second_page, "Page 2 of 2")
+
+    def test_my_listings_query_count_is_constant(self):
+        self.client.force_login(self.farmer)
+
+        with CaptureQueriesContext(connection) as one_listing:
+            self.client.get(reverse("my_listings"))
+
+        self.create_listings(5)
+
+        with CaptureQueriesContext(connection) as many_listings:
+            self.client.get(reverse("my_listings"))
+
+        self.assertEqual(
+            len(many_listings.captured_queries),
+            len(one_listing.captured_queries),
+        )
 
     def test_buyer_cannot_open_my_listings(self):
         self.client.force_login(self.buyer)
@@ -920,6 +1148,15 @@ class ListingBrowseTests(TestCase):
                 response = self.client.get(reverse("listings"), {"q": query})
                 self.assertContains(response, expected)
 
+    def test_search_query_is_capped(self):
+        response = self.client.get(reverse("listings"), {"q": "a" * 500})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            len(response.context["query"]),
+            SEARCH_QUERY_MAX_LENGTH,
+        )
+
     def test_browse_filters_by_category(self):
         response = self.client.get(
             reverse("listings"),
@@ -972,6 +1209,19 @@ class ListingBrowseTests(TestCase):
         self.assertEqual(first_page.context["page_obj"].paginator.count, 28)
         self.assertEqual(len(first_page.context["page_obj"]), 24)
         self.assertEqual(len(second_page.context["page_obj"]), 4)
+
+    def test_browse_count_does_not_join_likes(self):
+        with CaptureQueriesContext(connection) as queries:
+            self.client.get(reverse("listings"))
+
+        count_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if '"__count"' in query["sql"]
+        ]
+
+        self.assertEqual(len(count_queries), 1)
+        self.assertNotIn("listinglike", count_queries[0].lower())
 
     def test_detail_renders_listing(self):
         response = self.client.get(
@@ -1193,6 +1443,28 @@ class ListingLikeViewTests(TestCase):
         response = self.client.get(reverse("liked_listings"))
 
         self.assertContains(response, "2 likes")
+
+    def test_liked_listings_paginates(self):
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        for index in range(LISTINGS_PER_PAGE):
+            listing = self.make_listing(f"Saved listing {index}")
+            ListingLike.objects.create(user=self.buyer, listing=listing)
+        self.client.force_login(self.buyer)
+
+        first_page = self.client.get(reverse("liked_listings"))
+        second_page = self.client.get(reverse("liked_listings"), {"page": 2})
+
+        self.assertEqual(
+            first_page.context["page_obj"].paginator.count,
+            LISTINGS_PER_PAGE + 1,
+        )
+        self.assertEqual(
+            len(first_page.context["listings"]),
+            LISTINGS_PER_PAGE,
+        )
+        self.assertEqual(len(second_page.context["listings"]), 1)
+        self.assertContains(first_page, "Page 1 of 2")
+        self.assertContains(second_page, "Page 2 of 2")
 
 
 class ListingAdminTests(TestCase):
