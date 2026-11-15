@@ -159,6 +159,10 @@ python manage.py test --settings=config.settings_test
 
 CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
+Demo listings belong to the `demo-farmer@example.com` account. Remove them, their
+photos, and that account with `python manage.py delete_demo_listings`;
+`--dry-run` reports the counts first.
+
 ## Deployment
 
 1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
