@@ -184,6 +184,7 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -296,23 +297,29 @@ SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
     "SUPABASE_S3_QUERYSTRING_AUTH", ""
 ).lower() in {"1", "true", "yes"}
 
+# WhiteNoise serves the collected, hashed CSS/JS in production. Only the
+# media backend changes when uploads move to Supabase.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 if SUPABASE_S3_ENDPOINT:
-    STORAGES = {
-        "default": {
-            "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": supabase_storage_options(
-                endpoint=SUPABASE_S3_ENDPOINT,
-                bucket=SUPABASE_BUCKET,
-                access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
-                secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
-                region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                custom_domain=SUPABASE_S3_CUSTOM_DOMAIN,
-                querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
-            ),
-        },
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-        },
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": supabase_storage_options(
+            endpoint=SUPABASE_S3_ENDPOINT,
+            bucket=SUPABASE_BUCKET,
+            access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
+            secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
+            region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
+            custom_domain=SUPABASE_S3_CUSTOM_DOMAIN,
+            querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
+        ),
     }
 
 # Content Security Policy. Report-only until production reports show no

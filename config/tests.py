@@ -3,6 +3,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from storages.backends.s3 import S3Storage
 
+from config import settings as base_settings
 from config.storage import supabase_storage_options
 
 
@@ -108,4 +109,20 @@ class AdminPathTests(SimpleTestCase):
         self.assertEqual(
             reverse("admin:index"),
             f"/{settings.DJANGO_ADMIN_PATH}",
+        )
+
+
+class StaticFilesTests(SimpleTestCase):
+    def test_whitenoise_follows_security_middleware(self):
+        middleware = settings.MIDDLEWARE
+
+        self.assertEqual(
+            middleware.index("whitenoise.middleware.WhiteNoiseMiddleware"),
+            middleware.index("django.middleware.security.SecurityMiddleware") + 1,
+        )
+
+    def test_static_files_use_compressed_manifest_storage(self):
+        self.assertEqual(
+            base_settings.STORAGES["staticfiles"]["BACKEND"],
+            "whitenoise.storage.CompressedManifestStaticFilesStorage",
         )
