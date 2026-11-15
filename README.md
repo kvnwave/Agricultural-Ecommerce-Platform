@@ -89,7 +89,7 @@ Optional:
 | Variable | Purpose |
 | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google login. The button only appears when both are set. |
-| `DIRECT_URL` | Direct Supabase connection, used for `migrate`. |
+| `DIRECT_URL` | Direct or session Supabase connection (port 5432), used by `config.settings_direct` for `migrate` and `createcachetable`. |
 | `DB_SSL_REQUIRE` | Force TLS for remote databases. |
 | `CSRF_TRUSTED_ORIGINS` | Public HTTPS origins, needed in production. |
 | `DJANGO_ADMIN_PATH` | Admin URL path. Defaults to `control-panel/`. |
@@ -163,9 +163,9 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 
 1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
 2. Configure `EMAIL_HOST`, `DEFAULT_FROM_EMAIL`, and credentials. allauth sends verification links, so signup fails without working SMTP.
-3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
-4. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
-5. Create the shared cache table on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py createcachetable`. allauth's login throttles use it.
+3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432). The web process only ever uses `DATABASE_URL`.
+4. Run migrations on the direct connection: `python manage.py migrate --settings=config.settings_direct`.
+5. Create the shared cache table on the direct connection: `python manage.py createcachetable --settings=config.settings_direct`. allauth's login throttles use it.
 6. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
 7. Change the default `example.com` row in **Admin → Sites** to your domain.
 8. Run `npm run build` and `python manage.py collectstatic --noinput`. WhiteNoise serves the hashed files from `staticfiles/`.
@@ -190,6 +190,6 @@ CI runs that suite, checks for missing migrations, runs `check --deploy` with a 
 | Google button missing | Set both Google credentials and restart. |
 | `redirect_uri_mismatch` | Register the exact callback URL in Google Cloud Console. |
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |
-| Cursor errors on Supabase | Run `migrate` through `DIRECT_URL`, not the transaction pooler. |
+| Cursor errors on Supabase | Run schema commands with `--settings=config.settings_direct` so they use `DIRECT_URL`, not the transaction pooler. |
 | Uploaded photos missing after redeploy | Configure `SUPABASE_S3_*`. |
 | `zsh: no matches found` on a pip install with brackets | Quote the package name, e.g. `"psycopg[binary]"`. |
