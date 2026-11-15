@@ -11,6 +11,7 @@ from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
@@ -18,6 +19,8 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from PIL import Image
 
+from . import usernames
+from .adapters import AccountAdapter
 from .forms import SOCIAL_SIGNUP_ROLE_SESSION_KEY, SocialSignupForm
 from .models import Profile, User
 
@@ -53,6 +56,109 @@ class UserModelTests(TestCase):
                 User.objects.create_user(
                     "second", email="same@example.com", password="temporary-pass-1"
                 )
+
+
+class UsernamePolicyTests(TestCase):
+    def test_normalizes_case_and_whitespace(self):
+        self.assertEqual(
+            usernames.normalize_username("  Farmer_Jane "),
+            "farmer_jane",
+        )
+
+    def test_accepts_valid_handles(self):
+        for value in ("farmer_jane", "a1b", "user-1234abcd", "x" * 30):
+            with self.subTest(value=value):
+                self.assertEqual(usernames.validate_username(value), value)
+
+    def test_rejects_lengths_outside_bounds(self):
+        for value in ("ab", "x" * 31):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(
+                    ValidationError, "between 3 and 30"
+                ):
+                    usernames.validate_username(value)
+
+    def test_rejects_invalid_characters_and_edges(self):
+        values = (
+            "-farmer",
+            "farmer-",
+            "farmer jane",
+            "farmer@example.com",
+            "fármer",
+            "farmer.jane",
+            "farmer+name",
+        )
+
+        for value in values:
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    usernames.validate_username(value)
+
+    def test_rejects_reserved_names_case_insensitively(self):
+        for value in ("Admin", "SUPPORT", "marketplace"):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValidationError, "reserved"):
+                    usernames.validate_username(value)
+
+
+class GeneratedUsernameTests(TestCase):
+    def test_generated_handle_follows_policy_and_skips_collisions(self):
+        User.objects.create_user(
+            "user-deadbeef",
+            email="taken@example.com",
+            password="temporary-pass-1",
+        )
+
+        with mock.patch(
+            "accounts.usernames.secrets.token_hex",
+            side_effect=["deadbeef", "cafebabe"],
+        ):
+            handle = usernames.generate_username()
+
+        self.assertEqual(handle, "user-cafebabe")
+        self.assertEqual(usernames.validate_username(handle), handle)
+
+
+class AccountAdapterTests(TestCase):
+    def test_clean_username_normalizes_and_accepts(self):
+        self.assertEqual(
+            AccountAdapter().clean_username("  Farmer_Jane "),
+            "farmer_jane",
+        )
+
+    def test_clean_username_rejects_taken_handle_ignoring_case(self):
+        User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password="temporary-pass-1",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "already taken"):
+            AccountAdapter().clean_username("Farmer_Jane")
+
+    def test_clean_username_shallow_skips_uniqueness(self):
+        User.objects.create_user(
+            "farmer_jane",
+            email="jane@example.com",
+            password="temporary-pass-1",
+        )
+
+        self.assertEqual(
+            AccountAdapter().clean_username("Farmer_Jane", shallow=True),
+            "farmer_jane",
+        )
+
+    def test_generate_unique_username_uses_neutral_handle(self):
+        with mock.patch(
+            "accounts.adapters.usernames.generate_username",
+            return_value="user-1a2b3c4d",
+        ) as generate:
+            handle = AccountAdapter().generate_unique_username(
+                ["Jane", "jane@example.com"]
+            )
+
+        self.assertEqual(handle, "user-1a2b3c4d")
+        generate.assert_called_once_with()
 
 
 class AuthPageTests(TestCase):
@@ -98,6 +204,7 @@ class SignupFlowTests(TestCase):
         )
 
         user = User.objects.get(email="new@example.com")
+        self.assertRegex(user.username, r"^user-[0-9a-f]{8}$")
         self.assertEqual(user.profile.role, Profile.Role.BUYER)
         self.assertFalse(user.emailaddress_set.get(email=user.email).verified)
         self.assertEqual(len(mail.outbox), 1)
