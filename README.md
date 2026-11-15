@@ -144,8 +144,12 @@ analytics/       Placeholder
 notifications/   Placeholder
 templates/       HTML templates
 assets/          Tailwind source
-static/          Built CSS
+static/          Built CSS and vendored JavaScript
 ```
+
+`requirements-future.txt` pins infrastructure packages (Celery, Channels,
+Daphne) that the app does not import yet, so they stay out of the deployed
+environment until a feature needs them.
 
 ## Tests
 
