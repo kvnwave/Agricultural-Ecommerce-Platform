@@ -2,6 +2,7 @@ from allauth.account.forms import SignupForm as AllauthSignupForm
 from allauth.core import context as allauth_context
 from allauth.socialaccount.forms import SignupForm as AllauthSocialSignupForm
 from django import forms
+from django.db import transaction
 
 from . import usernames
 from .models import Profile
@@ -116,8 +117,28 @@ class ProfileForm(forms.ModelForm):
             ),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # ``_post_clean`` replaces the field before ``save`` runs, so keep the
+        # stored name now and delete it only after the new one commits.
+        self._old_avatar = self.instance.avatar.name if self.instance.pk else ""
+
     def clean_avatar(self):
         avatar = self.cleaned_data.get("avatar")
         if avatar and avatar.size > 5 * 1024 * 1024:
             raise forms.ValidationError("Choose an image smaller than 5 MB.")
         return avatar
+
+    def save(self, commit=True):
+        profile = super().save(commit=commit)
+        if not commit:
+            return profile
+
+        old_avatar = self._old_avatar
+        if old_avatar and old_avatar != profile.avatar.name:
+            storage = profile.avatar.storage
+            transaction.on_commit(
+                lambda: storage.delete(old_avatar),
+                robust=True,
+            )
+        return profile
