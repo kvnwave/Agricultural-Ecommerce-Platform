@@ -121,7 +121,7 @@ AUTHENTICATION_BACKENDS = [
 
 # Users remember their email, not the internal username Django requires.
 ACCOUNT_LOGIN_METHODS = {'email'}
-ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_SIGNUP_FIELDS = ['username', 'email*', 'password1*', 'password2*']
 # Adds the buyer/farmer choice before allauth creates the account.
 ACCOUNT_FORMS = {'signup': 'accounts.forms.SignupForm'}
 # One username policy and generated fallback for email and social signup.
@@ -138,6 +138,7 @@ SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 # New social accounts must choose a role; the start endpoint stores it first.
 SOCIALACCOUNT_AUTO_SIGNUP = False
 SOCIALACCOUNT_FORMS = {'signup': 'accounts.forms.SocialSignupForm'}
+SOCIALACCOUNT_ADAPTER = 'accounts.adapters.SocialAccountAdapter'
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
