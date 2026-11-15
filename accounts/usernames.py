@@ -168,4 +168,3 @@ def change_username(
     except IntegrityError as exc:
         raise UsernameTakenError from exc
     return locked
-
