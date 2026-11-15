@@ -94,6 +94,18 @@ Optional:
 | `TRUST_X_FORWARDED_PROTO` | Trust the proxy's `X-Forwarded-Proto`. Enable only when the proxy overwrites it. |
 | `SUPABASE_S3_*`, `SUPABASE_BUCKET` | Supabase Storage. Without these, uploads go to `media/`. |
 
+### Email
+
+Local development prints email to the console. Production requires:
+
+| Variable | Purpose |
+| --- | --- |
+| `EMAIL_HOST` | SMTP hostname. |
+| `DEFAULT_FROM_EMAIL` | Sender address accepted by the provider. |
+| `EMAIL_PORT` | Defaults to `587`. |
+| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | SMTP credentials, if required. |
+| `EMAIL_USE_TLS`, `EMAIL_USE_SSL` | STARTTLS (default) or implicit TLS. Set only one. |
+
 ## Google Login
 
 In Google Cloud Console, create a Web OAuth client and add these redirect URIs:
@@ -141,12 +153,13 @@ python manage.py test
 ## Deployment
 
 1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
-2. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
-3. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
-4. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
-5. Change the default `example.com` row in **Admin → Sites** to your domain.
-6. Run `npm run build` and `python manage.py collectstatic`.
-7. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
+2. Configure `EMAIL_HOST`, `DEFAULT_FROM_EMAIL`, and credentials. allauth sends verification links, so signup fails without working SMTP.
+3. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
+4. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
+5. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
+6. Change the default `example.com` row in **Admin → Sites** to your domain.
+7. Run `npm run build` and `python manage.py collectstatic`.
+8. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
 
 ## Supabase Notes
 
