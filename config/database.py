@@ -11,6 +11,7 @@ Supabase exposes the same database through two endpoints:
 """
 
 import logging
+import re
 from urllib.parse import urlparse
 
 import dj_database_url
@@ -27,6 +28,88 @@ SUPPORTED_SCHEMES = POSTGRES_SCHEMES | SQLITE_SCHEMES
 TRANSACTION_POOLER_PORT = 6543
 POOLER_HOST_SUFFIX = "pooler.supabase.com"
 
+# Characters that cannot appear raw inside the password portion of a
+# connection URL. Password managers hand these out unescaped, and CPython then
+# reports a misleading "does not appear to be an IPv4 or IPv6 address" error
+# for a bracketed password. Percent signs are absent on purpose, so a password
+# that is already percent-encoded is left alone.
+_PASSWORD_ESCAPES = {
+    " ": "%20",
+    '"': "%22",
+    "#": "%23",
+    "/": "%2F",
+    ":": "%3A",
+    "?": "%3F",
+    "@": "%40",
+    "[": "%5B",
+    "]": "%5D",
+}
+_PASSWORD_TRANSLATION = str.maketrans(_PASSWORD_ESCAPES)
+_AUTHORITY_END = re.compile(r"[/?#]")
+
+
+def encode_url_password(url):
+    """Percent-encode reserved characters in a database URL's password.
+
+    Only characters that cannot appear raw in ``userinfo`` are escaped, so a
+    password that is already percent-encoded comes back unchanged.
+    """
+
+    scheme, separator, rest = url.partition("://")
+    if not separator:
+        return url
+
+    authority_end = _AUTHORITY_END.search(rest)
+    if authority_end:
+        authority = rest[: authority_end.start()]
+        tail = rest[authority_end.start() :]
+    else:
+        authority, tail = rest, ""
+
+    userinfo, at, host = authority.rpartition("@")
+    if not at:
+        # A delimiter inside the password hides the authority boundary. Hosts
+        # cannot contain '@', so the URL's last '@' is still the delimiter.
+        userinfo, at, remainder = rest.rpartition("@")
+        if not at:
+            return url
+        remainder_end = _AUTHORITY_END.search(remainder)
+        if remainder_end:
+            host = remainder[: remainder_end.start()]
+            tail = remainder[remainder_end.start() :]
+        else:
+            host, tail = remainder, ""
+
+    user, colon, password = userinfo.partition(":")
+    if not colon or not password:
+        return url
+
+    encoded = password.translate(_PASSWORD_TRANSLATION)
+    return f"{scheme}{separator}{user}:{encoded}@{host}{tail}"
+
+
+def _parse_url(url):
+    """Parse ``url``, turning parser edge cases into configuration errors."""
+
+    try:
+        parsed = urlparse(url)
+        # urlparse defers host and port validation; touch them to force it.
+        parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise ImproperlyConfigured(
+            "The database URL could not be parsed. Percent-encode reserved "
+            'characters in the password: space, ", #, /, :, ?, @, [, ].'
+        ) from exc
+    return parsed
+
+
+def _parse_url_or_none(url):
+    try:
+        return _parse_url(url)
+    except ImproperlyConfigured:
+        return None
+
 
 def database_config(url, *, ssl_require):
     """Build a Django ``DATABASES`` entry from ``url``.
@@ -41,7 +124,8 @@ def database_config(url, *, ssl_require):
             "development or the Supabase transaction pooler URL."
         )
 
-    parsed = urlparse(url)
+    url = encode_url_password(url)
+    parsed = _parse_url(url)
     if parsed.scheme not in SUPPORTED_SCHEMES:
         raise ImproperlyConfigured(
             f"Unsupported database URL scheme '{parsed.scheme}'. Use "
@@ -64,17 +148,14 @@ def uses_transaction_pooler(url):
     if not url:
         return False
 
-    parsed = urlparse(url)
-    if parsed.scheme not in POSTGRES_SCHEMES:
-        return False
-
-    try:
-        port = parsed.port
-    except ValueError:
+    parsed = _parse_url_or_none(url)
+    if parsed is None or parsed.scheme not in POSTGRES_SCHEMES:
         return False
 
     host = parsed.hostname or ""
-    return port == TRANSACTION_POOLER_PORT or host.endswith(POOLER_HOST_SUFFIX)
+    return parsed.port == TRANSACTION_POOLER_PORT or host.endswith(
+        POOLER_HOST_SUFFIX
+    )
 
 
 def direct_database_config(database_url, direct_url, *, ssl_require):

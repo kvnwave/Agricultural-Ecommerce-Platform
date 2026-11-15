@@ -9,6 +9,7 @@ from config import settings as base_settings
 from config.database import (
     database_config,
     direct_database_config,
+    encode_url_password,
     uses_transaction_pooler,
 )
 from config.storage import supabase_storage_options
@@ -190,6 +191,81 @@ class DirectDatabaseConfigTests(SimpleTestCase):
 
         self.assertEqual(runtime["ENGINE"], expected["ENGINE"])
         self.assertTrue(runtime["DISABLE_SERVER_SIDE_CURSORS"])
+
+
+class DatabaseUrlPasswordTests(SimpleTestCase):
+    def test_reserved_password_characters_are_encoded(self):
+        for password in ('pa ss', 'pa"ss', "pa#ss", "pa/ss", "pa:ss", "pa?ss", "pa@ss", "pa[ss]", "pa&ss"):
+            with self.subTest(password=password):
+                url = (
+                    "postgresql://postgres."
+                    f"project:{password}@db.project.supabase.co:5432/postgres"
+                )
+
+                config = database_config(url, ssl_require=True)
+
+                self.assertEqual(config["HOST"], "db.project.supabase.co")
+                self.assertEqual(config["PORT"], 5432)
+                self.assertEqual(config["NAME"], "postgres")
+                self.assertEqual(config["PASSWORD"], password)
+
+    def test_bracketed_password_no_longer_breaks_url_parsing(self):
+        # CPython reads a raw '[' in the userinfo as an IPv6 literal.
+        url = "postgresql://postgres:pa[ss]word@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(
+            encode_url_password(url),
+            "postgresql://postgres:pa%5Bss%5Dword@db.project.supabase.co:5432/postgres",
+        )
+
+    def test_password_encoding_is_idempotent(self):
+        url = "postgresql://postgres:pa[ss]%40word@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(
+            encode_url_password(encode_url_password(url)),
+            encode_url_password(url),
+        )
+
+    def test_already_encoded_password_is_not_double_encoded(self):
+        config = database_config(
+            "postgresql://postgres:pa%5Bss%5D%40word@db.project.supabase.co:5432/postgres",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["PASSWORD"], "pa[ss]@word")
+
+    def test_query_parameters_survive_password_encoding(self):
+        config = database_config(
+            "postgresql://postgres:pa[ss]@db.project.supabase.co:5432/postgres"
+            "?sslmode=require&connect_timeout=5",
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+        self.assertEqual(config["PASSWORD"], "pa[ss]")
+
+    def test_url_without_password_is_unchanged(self):
+        url = "postgresql://postgres@db.project.supabase.co:5432/postgres"
+
+        self.assertEqual(encode_url_password(url), url)
+
+    def test_unparseable_url_reports_how_to_fix_it(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "Percent-encode"):
+            database_config(
+                "postgresql://postgres:secret@ho[st:5432/postgres",
+                ssl_require=True,
+            )
+
+
+class TestDatabaseIsolationTests(SimpleTestCase):
+    def test_test_suite_never_uses_the_configured_database(self):
+        # A Supabase URL in .env must not turn the test run into a client of
+        # the live project.
+        self.assertEqual(
+            settings.DATABASES["default"]["ENGINE"],
+            "django.db.backends.sqlite3",
+        )
+        self.assertEqual(base_settings.DATABASE_URL, "sqlite:///db.sqlite3")
 
 
 class ContentSecurityPolicyTests(TestCase):
