@@ -93,6 +93,17 @@ class MultipleImageField(forms.ImageField):
                 self.error_messages["required"],
                 code="required",
             )
+        # Count and size come first: Pillow must not parse files the request
+        # would reject anyway.
+        if len(data) > Listing.MAX_IMAGES:
+            raise forms.ValidationError(
+                f"Add at most {Listing.MAX_IMAGES} photos."
+            )
+        for item in data:
+            if item.size > MAX_IMAGE_BYTES:
+                raise forms.ValidationError(
+                    "Each photo must be smaller than 5 MB."
+                )
 
         return [super().clean(item, initial=None) for item in data]
 
@@ -160,14 +171,7 @@ class ListingForm(forms.ModelForm):
 
     def clean_images(self):
         images = self.cleaned_data.get("images") or []
-        cleaned = []
-        for image in images:
-            if image.size > MAX_IMAGE_BYTES:
-                raise forms.ValidationError(
-                    "Each photo must be smaller than 5 MB."
-                )
-            cleaned.append(_scrub_image(image))
-        return cleaned
+        return [_scrub_image(image) for image in images]
 
     def clean(self):
         cleaned_data = super().clean()

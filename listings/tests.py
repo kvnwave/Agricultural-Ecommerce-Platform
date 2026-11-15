@@ -523,6 +523,39 @@ class ListingFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("images", form.errors)
 
+    def test_too_many_photos_rejected_before_image_validation(self):
+        files = [
+            SimpleUploadedFile(
+                f"broken-{index}.png",
+                b"not an image",
+                content_type="image/png",
+            )
+            for index in range(6)
+        ]
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": files},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Add at most 5 photos.", form.errors["images"][0])
+
+    def test_oversized_photo_rejected_before_image_validation(self):
+        upload = SimpleUploadedFile(
+            "huge.png",
+            b"x" * (5 * 1024 * 1024 + 1),
+            content_type="image/png",
+        )
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("smaller than 5 MB", form.errors["images"][0])
+
     def test_free_listing_needs_no_price(self):
         form = ListingForm(
             data=self.valid_data(is_free="on", price=""),

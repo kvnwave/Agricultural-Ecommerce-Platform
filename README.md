@@ -160,6 +160,7 @@ python manage.py test
 6. Change the default `example.com` row in **Admin → Sites** to your domain.
 7. Run `npm run build` and `python manage.py collectstatic`.
 8. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
+9. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
 
 ## Supabase Notes
 
