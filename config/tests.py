@@ -1,11 +1,23 @@
 from django.conf import settings
 from django.contrib.staticfiles import finders
+from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from storages.backends.s3 import S3Storage
 
 from config import settings as base_settings
+from config.database import (
+    database_config,
+    direct_database_config,
+    uses_transaction_pooler,
+)
 from config.storage import supabase_storage_options
+
+POOLER_URL = (
+    "postgresql://postgres.project:secret@"
+    "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+)
+DIRECT_URL = "postgresql://postgres:secret@db.project.supabase.co:5432/postgres"
 
 
 class SupabaseStorageOptionsTests(SimpleTestCase):
@@ -86,6 +98,98 @@ class SupabaseStorageOptionsTests(SimpleTestCase):
     def test_invalid_endpoint_is_rejected(self):
         with self.assertRaises(ValueError):
             self.make_options(endpoint="not-a-url")
+
+
+class DatabaseConfigTests(SimpleTestCase):
+    def test_sqlite_url_is_not_given_tls_options(self):
+        config = database_config("sqlite:///db.sqlite3", ssl_require=True)
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.sqlite3")
+        self.assertFalse(config.get("OPTIONS"))
+
+    def test_postgres_url_requires_tls_outside_debug(self):
+        config = database_config(POOLER_URL, ssl_require=True)
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.postgresql")
+        self.assertEqual(config["OPTIONS"]["sslmode"], "require")
+
+    def test_postgres_url_can_skip_tls(self):
+        config = database_config(POOLER_URL, ssl_require=False)
+
+        self.assertNotEqual(config.get("OPTIONS", {}).get("sslmode"), "require")
+
+    def test_server_side_cursors_are_disabled(self):
+        config = database_config(POOLER_URL, ssl_require=True)
+
+        self.assertTrue(config["DISABLE_SERVER_SIDE_CURSORS"])
+
+    def test_missing_url_is_rejected(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "DATABASE_URL"):
+            database_config("", ssl_require=True)
+
+    def test_unsupported_scheme_is_rejected(self):
+        with self.assertRaisesRegex(ImproperlyConfigured, "mysql"):
+            database_config("mysql://user:secret@localhost/db", ssl_require=True)
+
+    def test_transaction_pooler_is_detected_by_port(self):
+        self.assertTrue(
+            uses_transaction_pooler(
+                "postgresql://postgres:secret@db.example.com:6543/postgres"
+            )
+        )
+
+    def test_transaction_pooler_is_detected_by_host(self):
+        self.assertTrue(uses_transaction_pooler(POOLER_URL))
+
+    def test_direct_connection_is_not_a_pooler(self):
+        self.assertFalse(uses_transaction_pooler(DIRECT_URL))
+        self.assertFalse(uses_transaction_pooler("sqlite:///db.sqlite3"))
+        self.assertFalse(uses_transaction_pooler(""))
+
+
+class DirectDatabaseConfigTests(SimpleTestCase):
+    def test_direct_url_takes_precedence(self):
+        config = direct_database_config(
+            POOLER_URL,
+            DIRECT_URL,
+            ssl_require=True,
+        )
+
+        self.assertEqual(config["HOST"], "db.project.supabase.co")
+        self.assertEqual(str(config["PORT"]), "5432")
+        self.assertEqual(config["OPTIONS"]["sslmode"], "require")
+
+    def test_missing_direct_url_warns_when_falling_back_to_pooler(self):
+        with self.assertLogs("config.database", level="WARNING") as logs:
+            config = direct_database_config(POOLER_URL, "", ssl_require=True)
+
+        self.assertIn("DIRECT_URL", logs.output[0])
+        self.assertEqual(
+            config["HOST"],
+            "aws-0-ap-southeast-1.pooler.supabase.com",
+        )
+
+    def test_sqlite_fallback_does_not_warn(self):
+        with self.assertNoLogs("config.database", level="WARNING"):
+            config = direct_database_config(
+                "sqlite:///db.sqlite3",
+                "",
+                ssl_require=True,
+            )
+
+        self.assertEqual(config["ENGINE"], "django.db.backends.sqlite3")
+
+    def test_runtime_settings_build_from_the_configured_url(self):
+        # The test runner rewrites the alias's NAME to its own database, so
+        # only the engine and cursor settings are comparable here.
+        expected = database_config(
+            base_settings.DATABASE_URL,
+            ssl_require=base_settings.DB_SSL_REQUIRE,
+        )
+        runtime = base_settings.DATABASES["default"]
+
+        self.assertEqual(runtime["ENGINE"], expected["ENGINE"])
+        self.assertTrue(runtime["DISABLE_SERVER_SIDE_CURSORS"])
 
 
 class ContentSecurityPolicyTests(TestCase):
