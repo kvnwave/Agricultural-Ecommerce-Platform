@@ -11,9 +11,10 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.storage import storages
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
@@ -22,6 +23,7 @@ from accounts.models import Profile, User
 
 from .forms import ListingForm
 from .models import Category, Listing, ListingImage, ListingLike
+from .views import LISTINGS_PER_PAGE
 
 
 def image_bytes():
@@ -985,6 +987,41 @@ class ListingViewTests(TestCase):
 
         self.assertContains(response, "Sold out")
         self.assertContains(response, "Back in stock Friday.")
+
+    def test_my_listings_paginates(self):
+        self.create_listings(LISTINGS_PER_PAGE)
+        self.client.force_login(self.farmer)
+
+        first_page = self.client.get(reverse("my_listings"))
+        second_page = self.client.get(reverse("my_listings"), {"page": 2})
+
+        self.assertEqual(
+            first_page.context["page_obj"].paginator.count,
+            LISTINGS_PER_PAGE + 1,
+        )
+        self.assertEqual(
+            len(first_page.context["listings"]),
+            LISTINGS_PER_PAGE,
+        )
+        self.assertEqual(len(second_page.context["listings"]), 1)
+        self.assertContains(first_page, "Page 1 of 2")
+        self.assertContains(second_page, "Page 2 of 2")
+
+    def test_my_listings_query_count_is_constant(self):
+        self.client.force_login(self.farmer)
+
+        with CaptureQueriesContext(connection) as one_listing:
+            self.client.get(reverse("my_listings"))
+
+        self.create_listings(5)
+
+        with CaptureQueriesContext(connection) as many_listings:
+            self.client.get(reverse("my_listings"))
+
+        self.assertEqual(
+            len(many_listings.captured_queries),
+            len(one_listing.captured_queries),
+        )
 
     def test_buyer_cannot_open_my_listings(self):
         self.client.force_login(self.buyer)
