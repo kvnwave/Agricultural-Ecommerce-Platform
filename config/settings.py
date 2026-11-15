@@ -59,6 +59,27 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
+# HTTPS and cookie security. Production is expected to sit behind a proxy that
+# terminates TLS. Trusting X-Forwarded-Proto is opt-in because the header is
+# client-controlled: if the proxy forwards it unchanged, a plain-HTTP request
+# can claim to be HTTPS, and Django will skip SECURE_SSL_REDIRECT.
+TRUST_X_FORWARDED_PROTO = os.getenv(
+    "TRUST_X_FORWARDED_PROTO", ""
+).lower() in {"1", "true", "yes"}
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    if TRUST_X_FORWARDED_PROTO:
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # One year. Subdomains and preload stay off until every subdomain is
+    # HTTPS-only: includeSubDomains breaks HTTP-only subdomains, and preload
+    # removal takes months.
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 365
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
 # Application definition
 
 INSTALLED_APPS = [
