@@ -773,6 +773,19 @@ class ListingViewTests(TestCase):
             position=listing.images.count(),
         )
 
+    def create_listings(self, count, status=Listing.Status.ACTIVE):
+        Listing.objects.bulk_create(
+            Listing(
+                farmer=self.farmer,
+                category=self.category,
+                title=f"Bulk listing {index}",
+                description="Bulk listing.",
+                price=Decimal("10.00"),
+                status=status,
+            )
+            for index in range(count)
+        )
+
     def valid_data(self, **overrides):
         data = {
             "title": "Fresh tomatoes",
@@ -817,6 +830,67 @@ class ListingViewTests(TestCase):
         listing = Listing.objects.get(title="Fresh tomatoes")
         self.assertEqual(listing.farmer, self.farmer)
         self.assertEqual(listing.images.count(), 1)
+
+    def test_create_page_redirects_when_open_listing_limit_is_reached(self):
+        self.create_listings(Listing.MAX_OPEN_LISTINGS - 1)
+        Listing.objects.filter(farmer=self.farmer).update(
+            created_at=timezone.now() - timedelta(days=2)
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(reverse("listing_create"), follow=True)
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "Archive or delete one")
+
+    def test_create_is_blocked_when_open_listing_limit_is_reached(self):
+        self.create_listings(Listing.MAX_OPEN_LISTINGS - 1)
+        Listing.objects.filter(farmer=self.farmer).update(
+            created_at=timezone.now() - timedelta(days=2)
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            {
+                **self.valid_data(),
+                "images": uploaded_image("cover.png"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "Archive or delete one")
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
+
+    def test_create_is_blocked_after_daily_limit(self):
+        self.create_listings(
+            Listing.MAX_LISTINGS_PER_DAY - 1,
+            status=Listing.Status.ARCHIVED,
+        )
+        self.client.force_login(self.farmer)
+
+        response = self.client.post(
+            reverse("listing_create"),
+            {
+                **self.valid_data(),
+                "images": uploaded_image("cover.png"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            response.redirect_chain,
+            [(reverse("my_listings"), 302)],
+        )
+        self.assertContains(response, "in 24 hours")
+        self.assertFalse(Listing.objects.filter(title="Fresh tomatoes").exists())
 
     def test_create_rejects_listing_without_photo(self):
         self.client.force_login(self.farmer)

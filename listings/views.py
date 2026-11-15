@@ -1,3 +1,4 @@
+from datetime import timedelta
 from functools import wraps
 
 from django.contrib import messages
@@ -9,15 +10,41 @@ from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from accounts.models import Profile
+from accounts.models import Profile, User
 
 from .forms import ListingForm
 from .models import Category, Listing, ListingLike
 
 PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
 LISTINGS_PER_PAGE = 24
+
+
+def listing_limit_message(user):
+    """Return why ``user`` cannot create another listing, or ``None``.
+
+    Archived listings are excluded from the open cap but still count toward
+    the rolling daily creation limit.
+    """
+
+    open_count = user.listings.exclude(status=Listing.Status.ARCHIVED).count()
+    if open_count >= Listing.MAX_OPEN_LISTINGS:
+        return (
+            f"You can keep at most {Listing.MAX_OPEN_LISTINGS} open listings. "
+            "Archive or delete one before creating another."
+        )
+
+    created_today = user.listings.filter(
+        created_at__gte=timezone.now() - timedelta(days=1)
+    ).count()
+    if created_today >= Listing.MAX_LISTINGS_PER_DAY:
+        return (
+            f"You can create at most {Listing.MAX_LISTINGS_PER_DAY} listings "
+            "in 24 hours. Try again later."
+        )
+    return None
 
 
 def farmer_required(view_func):
@@ -190,13 +217,26 @@ def liked_listings(request):
 @farmer_required
 def listing_create(request):
     if request.method == "POST":
-        form = ListingForm(request.POST, request.FILES)
-        if form.is_valid():
-            form.instance.farmer = request.user
-            form.save()
-            messages.success(request, "Your listing has been created.")
-            return redirect("my_listings")
+        with transaction.atomic():
+            # Serialize creations per farmer so two concurrent requests cannot
+            # both pass the cap check and save.
+            User.objects.select_for_update().get(pk=request.user.pk)
+            limit_message = listing_limit_message(request.user)
+            if limit_message:
+                messages.error(request, limit_message)
+                return redirect("my_listings")
+
+            form = ListingForm(request.POST, request.FILES)
+            if form.is_valid():
+                form.instance.farmer = request.user
+                form.save()
+                messages.success(request, "Your listing has been created.")
+                return redirect("my_listings")
     else:
+        limit_message = listing_limit_message(request.user)
+        if limit_message:
+            messages.error(request, limit_message)
+            return redirect("my_listings")
         form = ListingForm()
 
     return render(
