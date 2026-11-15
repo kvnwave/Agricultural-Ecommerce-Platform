@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+
+{% block title %}Change username{% endblock %}
+
+{% block content %}
+  {% comment %}
+    Username page context:
+    - `form`: UsernameChangeForm with the shared length and character rules.
+    - `cooldown_ends`: when the next change is allowed, or None.
+
+    Staff skip the cooldown, so `cooldown_ends` is None for them.
+  {% endcomment %}
+  <main class="mx-auto max-w-md px-4 py-8">
+    <h1 class="text-h3 text-fg">Change username</h1>
+    <p class="mt-2 text-fg/60">
+      Current username:
+      <span class="font-medium text-fg">{{ user.username }}</span>
+    </p>
+
+    {% if cooldown_ends %}
+      <p class="mt-6 rounded border border-fg/20 p-4 text-sm text-fg/70">
+        You can change your username again on
+        <strong>{{ cooldown_ends|date:"M j, Y" }}</strong>.
+      </p>
+    {% else %}
+      <form method="post" class="mt-6 space-y-4">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+          Save username
+        </button>
+      </form>
+    {% endif %}
+
+    <p class="mt-6 text-sm">
+      <a href="{% url 'profile' %}" class="text-fg/60 underline">Back to profile</a>
+    </p>
+  </main>
+{% endblock %}

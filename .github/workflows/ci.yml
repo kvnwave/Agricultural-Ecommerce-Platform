@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DEBUG: "False"
+      SECRET_KEY: ci-only-secret-key-that-is-long-enough-for-checks-1234567890
+      ALLOWED_HOSTS: example.com
+      CSRF_TRUSTED_ORIGINS: https://example.com
+      EMAIL_HOST: smtp.example.com
+      DEFAULT_FROM_EMAIL: market@example.com
+      DATABASE_URL: sqlite:///db.sqlite3
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install front-end dependencies and build CSS
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run tests
+        run: python manage.py test --settings=config.settings_test
+
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run deployment checks
+        run: python manage.py check --deploy
+
+      - name: Verify static files collect
+        run: python manage.py collectstatic --noinput
+
+      - name: Audit dependencies
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
