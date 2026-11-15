@@ -54,6 +54,11 @@ elif not DEBUG and SECRET_KEY.startswith("django-insecure-"):
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
+# Move the admin off the default path. Set a deployment-specific value and
+# restrict it at the proxy; obscurity alone is not access control.
+_admin_path = os.getenv("DJANGO_ADMIN_PATH", "control-panel/").strip("/")
+DJANGO_ADMIN_PATH = f"{_admin_path or 'control-panel'}/"
+
 # HTTPS deployments behind a proxy or custom domain need their public origin
 # trusted, otherwise Django rejects form posts as cross-site.
 CSRF_TRUSTED_ORIGINS = [

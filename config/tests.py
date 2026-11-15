@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from storages.backends.s3 import S3Storage
@@ -99,3 +100,12 @@ class ContentSecurityPolicyTests(TestCase):
         self.assertIn("object-src 'none'", policy)
         self.assertIn("base-uri 'self'", policy)
         self.assertNotIn("Content-Security-Policy", response.headers)
+
+
+class AdminPathTests(SimpleTestCase):
+    def test_admin_is_not_at_the_default_path(self):
+        self.assertNotEqual(settings.DJANGO_ADMIN_PATH, "admin/")
+        self.assertEqual(
+            reverse("admin:index"),
+            f"/{settings.DJANGO_ADMIN_PATH}",
+        )
