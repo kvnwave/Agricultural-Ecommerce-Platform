@@ -1444,6 +1444,28 @@ class ListingLikeViewTests(TestCase):
 
         self.assertContains(response, "2 likes")
 
+    def test_liked_listings_paginates(self):
+        ListingLike.objects.create(user=self.buyer, listing=self.listing)
+        for index in range(LISTINGS_PER_PAGE):
+            listing = self.make_listing(f"Saved listing {index}")
+            ListingLike.objects.create(user=self.buyer, listing=listing)
+        self.client.force_login(self.buyer)
+
+        first_page = self.client.get(reverse("liked_listings"))
+        second_page = self.client.get(reverse("liked_listings"), {"page": 2})
+
+        self.assertEqual(
+            first_page.context["page_obj"].paginator.count,
+            LISTINGS_PER_PAGE + 1,
+        )
+        self.assertEqual(
+            len(first_page.context["listings"]),
+            LISTINGS_PER_PAGE,
+        )
+        self.assertEqual(len(second_page.context["listings"]), 1)
+        self.assertContains(first_page, "Page 1 of 2")
+        self.assertContains(second_page, "Page 2 of 2")
+
 
 class ListingAdminTests(TestCase):
     def setUp(self):

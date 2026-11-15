@@ -17,6 +17,8 @@
           {% include 'listings/_listing_card.html' %}
         {% endfor %}
       </ul>
+
+      {% include 'partials/pagination.html' %}
     {% else %}
       <p class="mt-8 text-fg/60">
         You have not saved any listings yet.

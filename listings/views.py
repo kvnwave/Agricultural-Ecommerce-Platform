@@ -219,11 +219,17 @@ def liked_listings(request):
         .order_by("-likes__created_at")
     )
     listings = with_likes_total(listings)
+    page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
+        request.GET.get("page")
+    )
 
     return render(
         request,
         "listings/liked_listings.html",
-        {"listings": listings},
+        {
+            "page_obj": page_obj,
+            "listings": page_obj.object_list,
+        },
     )
 
 
