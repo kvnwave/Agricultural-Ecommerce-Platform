@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 from config.storage import supabase_storage_options
@@ -27,14 +28,26 @@ load_dotenv(BASE_DIR / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv',
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False") == "True"
+
+# SECURITY WARNING: keep the secret key used in production secret!
+INSECURE_DEV_SECRET_KEY = (
+    'django-insecure-gu0)e-4$@_&@%lplynj^11%k1kpe9ws^w&vz%wt1%b3a!-=6zv'
+)
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set when DEBUG is False. "
+            "Generate one with: python -c \"from django.core.management.utils "
+            "import get_random_secret_key as k; print(k())\""
+        )
+    SECRET_KEY = INSECURE_DEV_SECRET_KEY
+elif not DEBUG and SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must not use the generated development key in production."
+    )
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
