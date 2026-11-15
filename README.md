@@ -159,9 +159,10 @@ python manage.py test --settings=config.settings_test
 
 CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
-Demo listings belong to the `demo-farmer@example.com` account. Remove them, their
-photos, and that account with `python manage.py delete_demo_listings`;
-`--dry-run` reports the counts first.
+Demo listings, when present, belong to the `demo-farmer@example.com` account.
+Remove them, their photos, and that account with
+`python manage.py delete_demo_listings`; `--dry-run` reports the counts first.
+Removal is permanent, including the stored photos.
 
 ## Deployment
 

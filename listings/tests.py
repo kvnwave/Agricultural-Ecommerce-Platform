@@ -1601,6 +1601,25 @@ class DeleteDemoListingsCommandTests(TestCase):
         self.assertTrue(Listing.objects.filter(pk=self.real_listing.pk).exists())
         self.assertTrue(User.objects.filter(pk=self.real_farmer.pk).exists())
 
+    def test_command_removes_photos_from_storage(self):
+        listing = self.make_listing(self.demo_farmer, "Demo with photo")
+        photo = ListingImage.objects.create(
+            listing=listing,
+            image=SimpleUploadedFile(
+                "demo.png",
+                image_bytes(),
+                content_type="image/png",
+            ),
+        )
+        storage = photo.image.storage
+        name = photo.image.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("delete_demo_listings", stdout=StringIO())
+
+        self.assertFalse(ListingImage.objects.filter(pk=photo.pk).exists())
+        self.assertFalse(storage.exists(name))
+
     def test_command_reports_when_there_is_nothing_to_delete(self):
         self.demo_farmer.delete()
         output = StringIO()
