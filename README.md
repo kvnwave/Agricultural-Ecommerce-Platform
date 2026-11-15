@@ -91,6 +91,7 @@ Optional:
 | `DIRECT_URL` | Direct Supabase connection, used for `migrate`. |
 | `DB_SSL_REQUIRE` | Force TLS for remote databases. |
 | `CSRF_TRUSTED_ORIGINS` | Public HTTPS origins, needed in production. |
+| `TRUST_X_FORWARDED_PROTO` | Trust the proxy's `X-Forwarded-Proto`. Enable only when the proxy overwrites it. |
 | `SUPABASE_S3_*`, `SUPABASE_BUCKET` | Supabase Storage. Without these, uploads go to `media/`. |
 
 ## Google Login
@@ -139,13 +140,13 @@ python manage.py test
 
 ## Deployment
 
-1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`.
+1. Set `DEBUG=False`, a unique `SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS`. If the app sits behind a proxy that terminates TLS, set `TRUST_X_FORWARDED_PROTO=True` and make the proxy **replace** `X-Forwarded-Proto` with its own scheme; a forwarded client value would let plain HTTP bypass the HTTPS redirect. Leave it off when the app is exposed directly.
 2. Point `DATABASE_URL` at the Supabase transaction pooler (port 6543) and `DIRECT_URL` at the direct or session connection (port 5432).
 3. Run migrations on the direct connection: `DATABASE_URL="$DIRECT_URL" python manage.py migrate`.
 4. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
 5. Change the default `example.com` row in **Admin → Sites** to your domain.
 6. Run `npm run build` and `python manage.py collectstatic`.
-7. Run `python manage.py check --deploy`.
+7. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
 
 ## Supabase Notes
 
