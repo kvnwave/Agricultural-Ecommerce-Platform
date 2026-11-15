@@ -16,6 +16,7 @@ from pathlib import Path
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+from PIL import Image
 
 from config.storage import supabase_storage_options
 
@@ -253,6 +254,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # its S3 endpoint is configured, so the app server stays disposable.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Bound how much pixel data Pillow will decode for one upload. Forms also
+# reject images above this before applying EXIF orientation.
+Image.MAX_IMAGE_PIXELS = 25_000_000
 
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
