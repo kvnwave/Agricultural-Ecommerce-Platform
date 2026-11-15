@@ -1,6 +1,10 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib.auth.forms import UserChangeForm as DjangoUserChangeForm
+from django.db import transaction
 
+from . import usernames
 from .models import Profile, UsernameHistory, User
 
 
@@ -25,9 +29,49 @@ class UsernameHistoryInline(admin.TabularInline):
         return False
 
 
+class UserChangeForm(DjangoUserChangeForm):
+    """Apply the marketplace policy when staff edit a username."""
+
+    def clean_username(self):
+        value = usernames.validate_username(self.cleaned_data["username"])
+        if (
+            User.objects.filter(username__iexact=value)
+            .exclude(pk=self.instance.pk)
+            .exists()
+        ):
+            raise forms.ValidationError("That username is already taken.")
+        return value
+
+
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
+    form = UserChangeForm
     inlines = [ProfileInline, UsernameHistoryInline]
+
+    def save_model(self, request, obj, form, change):
+        old_username = None
+        if change:
+            old_username = User.objects.get(pk=obj.pk).username
+
+        username_changed = (
+            change
+            and usernames.normalize_username(old_username)
+            != usernames.normalize_username(obj.username)
+        )
+
+        with transaction.atomic():
+            if username_changed:
+                locked = usernames.change_username(
+                    obj,
+                    obj.username,
+                    actor=request.user,
+                    reason=UsernameHistory.Reason.ADMIN,
+                )
+                # Keep the admin instance in sync so the save below does not
+                # write the pre-change timestamp back over the service update.
+                obj.username = locked.username
+                obj.username_changed_at = locked.username_changed_at
+            super().save_model(request, obj, form, change)
 
 
 @admin.register(UsernameHistory)
