@@ -1201,6 +1201,19 @@ class ListingBrowseTests(TestCase):
         self.assertEqual(len(first_page.context["page_obj"]), 24)
         self.assertEqual(len(second_page.context["page_obj"]), 4)
 
+    def test_browse_count_does_not_join_likes(self):
+        with CaptureQueriesContext(connection) as queries:
+            self.client.get(reverse("listings"))
+
+        count_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if '"__count"' in query["sql"]
+        ]
+
+        self.assertEqual(len(count_queries), 1)
+        self.assertNotIn("listinglike", count_queries[0].lower())
+
     def test_detail_renders_listing(self):
         response = self.client.get(
             reverse("listing_detail", args=[self.active.public_id])

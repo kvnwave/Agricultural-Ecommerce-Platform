@@ -22,6 +22,28 @@ PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
 LISTINGS_PER_PAGE = 24
 
 
+def with_likes_total(queryset):
+    """Annotate ``likes_total`` without joining the likes table.
+
+    ``Count("likes")`` adds a ``LEFT OUTER JOIN`` and ``GROUP BY``, which also
+    slows ``Paginator.count``. A correlated subquery keeps the count query on
+    the listings table alone.
+    """
+
+    return queryset.annotate(
+        likes_total=Coalesce(
+            Subquery(
+                ListingLike.objects.filter(listing=OuterRef("pk"))
+                .values("listing")
+                .annotate(total=Count("pk"))
+                .values("total"),
+                output_field=IntegerField(),
+            ),
+            0,
+        )
+    )
+
+
 def listing_limit_message(user):
     """Return why ``user`` cannot create another listing, or ``None``.
 
@@ -67,9 +89,9 @@ def listings_view(request):
         Listing.objects.filter(status__in=PUBLIC_LISTING_STATUSES)
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .annotate(likes_total=Count("likes"))
         .order_by("-created_at")
     )
+    listings = with_likes_total(listings)
 
     query = (request.GET.get("q") or "").strip()
     if query:
@@ -119,9 +141,11 @@ def listings_view(request):
 
 def listing_detail(request, public_id):
     listing = get_object_or_404(
-        Listing.objects.select_related("category", "farmer")
-        .prefetch_related("images")
-        .annotate(likes_total=Count("likes")),
+        with_likes_total(
+            Listing.objects.select_related("category", "farmer").prefetch_related(
+                "images"
+            )
+        ),
         public_id=public_id,
     )
 
@@ -191,20 +215,9 @@ def liked_listings(request):
         )
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .annotate(
-            likes_total=Coalesce(
-                Subquery(
-                    ListingLike.objects.filter(listing=OuterRef("pk"))
-                    .values("listing")
-                    .annotate(total=Count("pk"))
-                    .values("total"),
-                    output_field=IntegerField(),
-                ),
-                0,
-            )
-        )
         .order_by("-likes__created_at")
     )
+    listings = with_likes_total(listings)
 
     return render(
         request,
@@ -304,10 +317,9 @@ def listing_delete(request, public_id):
 @farmer_required
 def my_listings(request):
     listings = (
-        request.user.listings.select_related("category")
-        .annotate(likes_total=Count("likes"))
-        .order_by("-created_at")
+        request.user.listings.select_related("category").order_by("-created_at")
     )
+    listings = with_likes_total(listings)
     page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
         request.GET.get("page")
     )
