@@ -14,12 +14,12 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
 from dotenv import load_dotenv
 from PIL import Image
 
+from config.database import database_config
 from config.storage import supabase_storage_options
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -219,23 +219,22 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# The web process connects through Supabase's transaction pooler (port 6543).
+# DIRECT_URL is the direct or session connection (port 5432) that
+# config.settings_direct uses for migrations and createcachetable, because the
+# pooler cannot hold the session state those commands need.
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+DIRECT_DATABASE_URL = os.getenv("DIRECT_URL", "")
 
 # Empty values fall back to requiring TLS outside DEBUG.
 DB_SSL_REQUIRE = os.getenv("DB_SSL_REQUIRE") or str(not DEBUG)
 DB_SSL_REQUIRE = DB_SSL_REQUIRE.lower() in {"1", "true", "yes"}
 
 DATABASES = {
-    "default": dj_database_url.config(
-        env="DATABASE_URL",
-        conn_max_age=0,
-        # SQLite passes OPTIONS straight to sqlite3 and rejects Postgres sslmode.
-        ssl_require=DB_SSL_REQUIRE and not DATABASE_URL.startswith("sqlite"),
-    )
+    # No connection reuse: a long-lived connection per worker exhausts the
+    # pooler's client limit.
+    "default": database_config(DATABASE_URL, ssl_require=DB_SSL_REQUIRE),
 }
-# Supabase's transaction pooler cannot keep server-side cursors open between
-# statements, so Django must avoid them.
-DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
