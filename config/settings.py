@@ -12,9 +12,11 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 from dotenv import load_dotenv
 from PIL import Image
 
@@ -160,6 +162,7 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -265,6 +268,7 @@ DATA_UPLOAD_MAX_NUMBER_FILES = 10
 
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
+SUPABASE_S3_CUSTOM_DOMAIN = os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", "")
 # Public buckets get permanent object URLs; private buckets use signed URLs.
 SUPABASE_S3_QUERYSTRING_AUTH = os.getenv(
     "SUPABASE_S3_QUERYSTRING_AUTH", ""
@@ -280,7 +284,7 @@ if SUPABASE_S3_ENDPOINT:
                 access_key=os.getenv("SUPABASE_S3_ACCESS_KEY", ""),
                 secret_key=os.getenv("SUPABASE_S3_SECRET_KEY", ""),
                 region=os.getenv("SUPABASE_S3_REGION", "ap-southeast-1"),
-                custom_domain=os.getenv("SUPABASE_S3_CUSTOM_DOMAIN", ""),
+                custom_domain=SUPABASE_S3_CUSTOM_DOMAIN,
                 querystring_auth=SUPABASE_S3_QUERYSTRING_AUTH,
             ),
         },
@@ -288,6 +292,26 @@ if SUPABASE_S3_ENDPOINT:
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
     }
+
+# Content Security Policy. Report-only until production reports show no
+# breakage; then copy this into SECURE_CSP to enforce it.
+csp_image_sources = [CSP.SELF, "https://*.googleusercontent.com"]
+if SUPABASE_S3_ENDPOINT:
+    csp_endpoint = urlparse(SUPABASE_S3_ENDPOINT)
+    csp_image_sources.append(f"{csp_endpoint.scheme}://{csp_endpoint.netloc}")
+if SUPABASE_S3_CUSTOM_DOMAIN:
+    csp_domain = SUPABASE_S3_CUSTOM_DOMAIN
+    if "://" not in csp_domain:
+        csp_domain = f"https://{csp_domain}"
+    csp_domain = urlparse(csp_domain)
+    csp_image_sources.append(f"{csp_domain.scheme}://{csp_domain.netloc}")
+
+SECURE_CSP_REPORT_ONLY = {
+    "default-src": [CSP.SELF],
+    "img-src": csp_image_sources,
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.SELF],
+}
 
 # Email
 # Local development prints messages to the console. Production must use SMTP;
