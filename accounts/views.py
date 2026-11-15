@@ -4,9 +4,10 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
-from .forms import ProfileForm, SOCIAL_SIGNUP_ROLE_SESSION_KEY
+from . import usernames
+from .forms import ProfileForm, SOCIAL_SIGNUP_ROLE_SESSION_KEY, UsernameChangeForm
 from .models import Profile
 
 
@@ -23,7 +24,55 @@ def profile_view(request):
     else:
         form = ProfileForm(instance=profile)
 
-    return render(request, "accounts/accounts.html", {"form": form})
+    cooldown_ends = None
+    if not request.user.is_staff:
+        cooldown_ends = usernames.username_cooldown_ends(request.user)
+
+    return render(
+        request,
+        "accounts/accounts.html",
+        {"form": form, "cooldown_ends": cooldown_ends},
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def username_change(request):
+    cooldown_ends = None
+    if not request.user.is_staff:
+        cooldown_ends = usernames.username_cooldown_ends(request.user)
+
+    if request.method == "POST" and cooldown_ends is None:
+        form = UsernameChangeForm(request.POST, user=request.user)
+        if form.is_valid():
+            try:
+                usernames.change_username(
+                    request.user,
+                    form.cleaned_data["username"],
+                    actor=request.user,
+                )
+            except usernames.UsernameCooldownError as exc:
+                cooldown_ends = exc.available_at
+                form.add_error(
+                    None,
+                    "You can change your username again on "
+                    f"{exc.available_at:%b %d, %Y}.",
+                )
+            except usernames.UsernameTakenError:
+                form.add_error("username", "That username is already taken.")
+            except usernames.UsernameUnchangedError:
+                form.add_error("username", "That is already your username.")
+            else:
+                messages.success(request, "Your username was updated.")
+                return redirect("profile")
+    else:
+        form = UsernameChangeForm(user=request.user)
+
+    return render(
+        request,
+        "accounts/username_change.html",
+        {"form": form, "cooldown_ends": cooldown_ends},
+    )
 
 
 @require_GET

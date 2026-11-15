@@ -126,6 +126,8 @@ ACCOUNT_SIGNUP_FIELDS = ['username', 'email*', 'password1*', 'password2*']
 ACCOUNT_FORMS = {'signup': 'accounts.forms.SignupForm'}
 # One username policy and generated fallback for email and social signup.
 ACCOUNT_ADAPTER = 'accounts.adapters.AccountAdapter'
+# First change is immediate; later changes wait this many days.
+USERNAME_CHANGE_COOLDOWN_DAYS = 7
 # Email is the account identifier, so an unverified address cannot log in.
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 # Temporary landing page until the marketplace dashboard exists.
