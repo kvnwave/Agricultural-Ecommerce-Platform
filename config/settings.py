@@ -259,6 +259,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 # reject images above this before applying EXIF orientation.
 Image.MAX_IMAGE_PIXELS = 25_000_000
 
+# A listing accepts five photos. Reject requests carrying more files before
+# Django stores them; the form still checks the per-listing total.
+DATA_UPLOAD_MAX_NUMBER_FILES = 10
+
 SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "listings")
 # Public buckets get permanent object URLs; private buckets use signed URLs.
