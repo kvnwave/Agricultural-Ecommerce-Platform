@@ -20,6 +20,7 @@ from .models import Category, Listing, ListingLike
 
 PUBLIC_LISTING_STATUSES = (Listing.Status.ACTIVE, Listing.Status.SOLD_OUT)
 LISTINGS_PER_PAGE = 24
+SEARCH_QUERY_MAX_LENGTH = 100
 
 
 def with_likes_total(queryset):
@@ -93,7 +94,7 @@ def listings_view(request):
     )
     listings = with_likes_total(listings)
 
-    query = (request.GET.get("q") or "").strip()
+    query = (request.GET.get("q") or "").strip()[:SEARCH_QUERY_MAX_LENGTH]
     if query:
         listings = listings.filter(
             Q(title__icontains=query)
