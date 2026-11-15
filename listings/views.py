@@ -304,13 +304,19 @@ def listing_delete(request, public_id):
 @farmer_required
 def my_listings(request):
     listings = (
-        request.user.listings.prefetch_related("images")
+        request.user.listings.select_related("category")
         .annotate(likes_total=Count("likes"))
         .order_by("-created_at")
+    )
+    page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
+        request.GET.get("page")
     )
 
     return render(
         request,
         "listings/my_listings.html",
-        {"listings": listings},
+        {
+            "page_obj": page_obj,
+            "listings": page_obj.object_list,
+        },
     )
