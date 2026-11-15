@@ -139,6 +139,10 @@ class Listing(models.Model):
                 fields=["category", "status", "-created_at"],
                 name="listing_cat_status_created_idx",
             ),
+            models.Index(
+                fields=["status", "-created_at"],
+                name="listing_status_created_idx",
+            ),
         ]
         constraints = [
             models.CheckConstraint(
