@@ -2,6 +2,7 @@ import io
 import shutil
 import tempfile
 import uuid
+import warnings
 from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
@@ -35,6 +36,21 @@ def uploaded_image(filename="photo.png"):
         image_bytes(),
         content_type="image/png",
     )
+
+
+def gps_jpeg_bytes():
+    """A sideways JPEG carrying GPS coordinates in EXIF."""
+
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Rotate 90 degrees clockwise when displayed.
+    gps = exif.get_ifd(0x8825)
+    gps[1] = "N"
+    gps[2] = (14.0, 35.0, 0.0)
+    gps[3] = "E"
+    gps[4] = (120.0, 58.0, 0.0)
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 10), "green").save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
 
 
 def create_farmer(username="farmer"):
@@ -425,6 +441,74 @@ class ListingFormTests(TestCase):
         )
 
         self.assertTrue(form.is_valid(), form.errors)
+
+    def test_upload_strips_exif_gps_and_applies_orientation(self):
+        upload = SimpleUploadedFile(
+            "farm.jpg",
+            gps_jpeg_bytes(),
+            content_type="image/jpeg",
+        )
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        listing = form.save()
+        stored = listing.images.get()
+
+        with stored.image.open("rb") as file:
+            with Image.open(file) as saved:
+                self.assertEqual(saved.size, (10, 20))
+                self.assertEqual(dict(saved.getexif()), {})
+                self.assertEqual(dict(saved.getexif().get_ifd(0x8825)), {})
+
+    def test_upload_rejects_unsupported_image_formats(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (20, 20), "green").save(buffer, format="BMP")
+        upload = SimpleUploadedFile(
+            "farm.bmp",
+            buffer.getvalue(),
+            content_type="image/bmp",
+        )
+
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("JPEG, PNG, or WebP", form.errors["images"][0])
+
+    def test_upload_extension_matches_detected_format(self):
+        upload = SimpleUploadedFile(
+            "farm.png",
+            gps_jpeg_bytes(),
+            content_type="image/png",
+        )
+        form = ListingForm(
+            data=self.valid_data(),
+            files={"images": [upload]},
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        listing = form.save()
+
+        self.assertTrue(listing.images.get().image.name.endswith(".jpg"))
+
+    def test_upload_rejects_images_over_pixel_limit(self):
+        with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 300):
+            form = ListingForm(
+                data=self.valid_data(),
+                files={"images": [uploaded_image()]},
+            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                self.assertFalse(form.is_valid())
+
+        self.assertIn("too large", form.errors["images"][0])
 
     def test_create_rejects_more_than_five_photos(self):
         form = ListingForm(
