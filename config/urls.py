@@ -31,7 +31,7 @@ urlpatterns = [
         RedirectView.as_view(pattern_name='listings', permanent=False),
         name='home',
     ),
-    path('admin/', admin.site.urls),
+    path(settings.DJANGO_ADMIN_PATH, admin.site.urls),
     path('accounts/', accounts_views.profile_view, name='profile'),
     path(
         'accounts/username/',
