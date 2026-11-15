@@ -64,7 +64,7 @@ npm run watch
 python manage.py runserver
 ```
 
-Open `http://127.0.0.1:8000/`. Admin is at `/admin/`.
+Open `http://127.0.0.1:8000/`. Admin is at `/control-panel/` by default; change it with `DJANGO_ADMIN_PATH`.
 
 Build CSS once without watching: `npm run build`.
 
@@ -92,6 +92,7 @@ Optional:
 | `DIRECT_URL` | Direct Supabase connection, used for `migrate`. |
 | `DB_SSL_REQUIRE` | Force TLS for remote databases. |
 | `CSRF_TRUSTED_ORIGINS` | Public HTTPS origins, needed in production. |
+| `DJANGO_ADMIN_PATH` | Admin URL path. Defaults to `control-panel/`. |
 | `TRUST_X_FORWARDED_PROTO` | Trust the proxy's `X-Forwarded-Proto`. Enable only when the proxy overwrites it. |
 | `SUPABASE_S3_*`, `SUPABASE_BUCKET` | Supabase Storage. Without these, uploads go to `media/`. |
 
@@ -164,6 +165,7 @@ python manage.py test
 9. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
 10. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
 11. CSP starts in report-only mode (`SECURE_CSP_REPORT_ONLY`). Review reports from the marketplace, admin, and allauth pages, then copy the policy into `SECURE_CSP` to enforce it. Allauth’s email-management templates use inline JSON and style attributes, so verify those pages before enforcing.
+12. Set `DJANGO_ADMIN_PATH` to a deployment-specific value and restrict that path at the proxy (IP allowlist or VPN). Django’s admin login is outside allauth’s rate limits, so the proxy is the throttle.
 
 ## Supabase Notes
 
