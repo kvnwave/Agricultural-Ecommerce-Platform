@@ -2,6 +2,12 @@
 
 A Django marketplace for agricultural products. Farmers post produce listings. Buyers browse and save them.
 
+> **Frontend handoff:** the marketplace templates were removed so the frontend
+> can be rebuilt separately. The Tailwind/htmx assets and the account pages are
+> unchanged. See
+> [docs/frontend-instructions.md](docs/frontend-instructions.md) for every
+> route, URL name, context variable, and form field the views expose.
+
 ## Status
 
 | Feature | State |
@@ -10,18 +16,23 @@ A Django marketplace for agricultural products. Farmers post produce listings. B
 | Farmer listings (create, edit, delete, up to 5 photos) | Done |
 | Browse, search, filter, like listings | Done |
 | Sold-out status with restock note | Done |
+| Marketplace frontend templates | Removed for handoff |
 | Buyer/farmer chat | Planned |
 | Notifications (email, SMS) | Planned |
 | Analytics | Planned |
 
-`chat`, `analytics`, and `notifications` are placeholder apps for now.
+`chat`, `analytics`, and `notifications` are placeholder apps for now. Their
+views still exist, but their templates were removed with the rest of the
+marketplace frontend.
 
 ## Stack
 
 - Django 6.1, django-allauth (email + Google login)
 - SQLite for local development, Supabase Postgres for production
 - Supabase Storage (S3 protocol, via django-storages) for uploaded photos
-- Tailwind CSS v4 (npm CLI)
+- Tailwind CSS v4 (npm CLI) and htmx for the server-rendered pages
+- Django templates: the marketplace pages are being rebuilt separately; the
+  authentication pages still render through Django
 
 ## Requirements
 
@@ -67,6 +78,12 @@ python manage.py runserver
 Open `http://127.0.0.1:8000/`. Admin is at `/control-panel/` by default; change it with `DJANGO_ADMIN_PATH`.
 
 Build CSS once without watching: `npm run build`.
+
+Authentication pages render under `/accounts/` (for example,
+`/accounts/login/`). Marketplace routes return
+`TemplateDoesNotExist` until the frontend templates are restored; the required
+template paths and context variables are listed in
+[docs/frontend-instructions.md](docs/frontend-instructions.md).
 
 ## Environment Variables
 
@@ -139,23 +156,52 @@ Browse filters: `q`, `category`, `condition`, `pricing` (`free` or `paid`), `pag
 config/          Settings, URLs, storage helper
 accounts/        Custom user, profile, signup
 listings/        Categories, listings, images, likes
-chat/            Placeholder
-analytics/       Placeholder
-notifications/   Placeholder
-templates/       HTML templates
+chat/            Placeholder view
+analytics/       Placeholder view
+notifications/   Placeholder view
+docs/            Frontend handoff instructions
+templates/       Base shell, auth pages, and the profile pages
 assets/          Tailwind source
 static/          Built CSS and vendored JavaScript
 ```
 
+The marketplace and placeholder templates were removed; the Tailwind source,
+built CSS, htmx, and npm files stay in place. The remaining
+`templates/base.html`, `templates/account/`, `templates/socialaccount/`, and
+`templates/accounts/` files keep login, signup, email verification, password
+reset, and the profile pages working. New marketplace templates should live
+under `templates/` and extend `base.html`.
+
 `requirements-future.txt` pins infrastructure packages (Celery, Channels,
 Daphne) that the app does not import yet, so they stay out of the deployed
 environment until a feature needs them.
+
+## Frontend Handoff
+
+The frontend teammate has a complete contract in
+[docs/frontend-instructions.md](docs/frontend-instructions.md):
+
+- Removed and kept template paths.
+- Every route, URL name, HTTP method, and permission rule.
+- The exact context variables each view passes, including pagination,
+  search/filter values, forms, and listing/profile model fields.
+- Form fields, file-upload limits, CSRF requirements, and redirect targets.
+
+The short version: put a template at the path listed for each view, extend
+`base.html`, use `{% url %}` with the documented names, and include
+`{% csrf_token %}` in every POST form. The views already supply the variables;
+no Python changes are needed to reconnect the pages.
 
 ## Tests
 
 ```bash
 python manage.py test --settings=config.settings_test
 ```
+
+Template-dependent tests will fail until the marketplace templates are
+restored. They are intentionally left in place so they show exactly what the
+frontend needs to satisfy. Tests for models, forms, permissions, and search
+still run normally.
 
 CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
@@ -173,7 +219,7 @@ Removal is permanent, including the stored photos.
 5. Create the shared cache table on the direct connection: `python manage.py createcachetable --settings=config.settings_direct`. allauth's login throttles use it.
 6. Configure `SUPABASE_S3_*` so uploads persist. The app filesystem is disposable.
 7. Change the default `example.com` row in **Admin → Sites** to your domain.
-8. Run `npm run build` and `python manage.py collectstatic --noinput`. WhiteNoise serves the hashed files from `staticfiles/`.
+8. Run `python manage.py collectstatic --noinput`. WhiteNoise serves the collected admin static files from `staticfiles/`.
 9. Run `python manage.py check --deploy`. `W005` and `W021` are expected until every subdomain is HTTPS-only; enabling HSTS subdomains or preload early can make HTTP-only subdomains unreachable and is slow to undo.
 10. Set the proxy request body limit to at least 30 MB (nginx: `client_max_body_size 30m;`). Django spools oversized bodies to disk before form validation, so the proxy should reject them first.
 11. CSP starts in report-only mode (`SECURE_CSP_REPORT_ONLY`). Review reports from the marketplace, admin, and allauth pages, then copy the policy into `SECURE_CSP` to enforce it. Allauth’s email-management templates use inline JSON and style attributes, so verify those pages before enforcing.
@@ -193,7 +239,7 @@ Removal is permanent, including the stored photos.
 | Symptom | Fix |
 | --- | --- |
 | `No DATABASE_URL environment variable set` | Add `DATABASE_URL` to `.env`. |
-| Page has no styles | Run `npm run build`. |
+| `TemplateDoesNotExist` on a marketplace route | Expected during the handoff. Create the template listed in `docs/frontend-instructions.md`. |
 | Google button missing | Set both Google credentials and restart. |
 | `redirect_uri_mismatch` | Register the exact callback URL in Google Cloud Console. |
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |
