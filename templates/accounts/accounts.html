@@ -40,13 +40,15 @@
       <label for="{{ form.avatar.id_for_label }}" class="block text-sm font-medium text-fg">
         Profile photo
       </label>
-      {% if user.profile.avatar %}
-        <p class="mt-1 text-xs text-fg/60">Uploading a new photo replaces your current one.</p>
-      {% elif user.profile.avatar_url %}
-        <p class="mt-1 text-xs text-fg/60">Your Google photo is used until you upload one.</p>
-      {% else %}
-        <p class="mt-1 text-xs text-fg/60">Add a photo so buyers and farmers can recognize you.</p>
-      {% endif %}
+      {% with avatar_url=user.profile.avatar_url %}
+        {% if user.profile.avatar %}
+          <p class="mt-1 text-xs text-fg/60">Uploading a new photo replaces your current one.</p>
+        {% elif avatar_url %}
+          <p class="mt-1 text-xs text-fg/60">Your Google photo is used until you upload one.</p>
+        {% else %}
+          <p class="mt-1 text-xs text-fg/60">Add a photo so buyers and farmers can recognize you.</p>
+        {% endif %}
+      {% endwith %}
       {{ form.avatar }}
       {% for error in form.avatar.errors %}
         <p class="mt-1 text-sm text-red-400">{{ error }}</p>

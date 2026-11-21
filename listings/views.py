@@ -11,6 +11,7 @@ from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Profile, User
@@ -90,12 +91,15 @@ def listings_view(request):
         Listing.objects.filter(status__in=PUBLIC_LISTING_STATUSES)
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
     )
     listings = with_likes_total(listings)
 
     query = (request.GET.get("q") or "").strip()[:SEARCH_QUERY_MAX_LENGTH]
     if query:
+        # Portable across SQLite and Postgres, but icontains cannot use a
+        # normal index. Move to full-text or trigram search when the table
+        # grows enough for the sequential scan to matter.
         listings = listings.filter(
             Q(title__icontains=query)
             | Q(description__icontains=query)
@@ -202,6 +206,21 @@ def listing_like_toggle(request, public_id):
             {"listing": listing, "is_liked": created},
         )
 
+    # Return to the page that submitted the form (the detail page, saved
+    # listings, or a card grid). Fall back to the detail page when the form
+    # did not include a safe destination.
+    candidate = (
+        request.POST.get("next")
+        or request.GET.get("next")
+        or request.META.get("HTTP_REFERER")
+    )
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(candidate)
+
     return redirect("listing_detail", public_id=listing.public_id)
 
 
@@ -216,7 +235,7 @@ def liked_listings(request):
         )
         .select_related("category", "farmer")
         .prefetch_related("images")
-        .order_by("-likes__created_at")
+        .order_by("-likes__created_at", "-id")
     )
     listings = with_likes_total(listings)
     page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(
@@ -285,6 +304,12 @@ def listing_update(request, public_id):
         if saved:
             messages.success(request, "Your listing has been updated.")
             return redirect("my_listings")
+
+        # ModelForm.construct_instance writes the submitted values onto
+        # ``listing`` even when validation fails. Restore the stored row so
+        # the page heading and sidebar show the saved title, not the rejected
+        # one. The bound form keeps the user's input for the fields.
+        listing.refresh_from_db()
     else:
         listing = get_object_or_404(
             Listing,
@@ -324,7 +349,9 @@ def listing_delete(request, public_id):
 @farmer_required
 def my_listings(request):
     listings = (
-        request.user.listings.select_related("category").order_by("-created_at")
+        request.user.listings.select_related("category").order_by(
+            "-created_at", "-id"
+        )
     )
     listings = with_likes_total(listings)
     page_obj = Paginator(listings, LISTINGS_PER_PAGE).get_page(

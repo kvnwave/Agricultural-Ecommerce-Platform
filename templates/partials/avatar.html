@@ -10,20 +10,22 @@
   users who have not uploaded anything yet.
 {% endcomment %}
 {% with avatar_user=avatar_user|default:user %}
-  {% if avatar_user.profile.avatar_url %}
-    <img
-      src="{{ avatar_user.profile.avatar_url }}"
-      alt="{{ avatar_user.get_full_name|default:avatar_user.email }}"
-      class="h-10 w-10 rounded-full object-cover"
-      referrerpolicy="no-referrer"
-    >
-  {% else %}
-    <span
-      role="img"
-      aria-label="Avatar for {{ avatar_user.get_full_name|default:avatar_user.email }}"
-      class="flex h-10 w-10 items-center justify-center rounded-full bg-fg/10 text-fg"
-    >
-      {{ avatar_user.get_full_name|default:avatar_user.email|first|upper }}
-    </span>
-  {% endif %}
+  {% with avatar_url=avatar_user.profile.avatar_url %}
+    {% if avatar_url %}
+      <img
+        src="{{ avatar_url }}"
+        alt="{{ avatar_user.get_full_name|default:avatar_user.email }}"
+        class="h-10 w-10 rounded-full object-cover"
+        referrerpolicy="no-referrer"
+      >
+    {% else %}
+      <span
+        role="img"
+        aria-label="Avatar for {{ avatar_user.get_full_name|default:avatar_user.email }}"
+        class="flex h-10 w-10 items-center justify-center rounded-full bg-fg/10 text-fg"
+      >
+        {{ avatar_user.get_full_name|default:avatar_user.email|first|upper }}
+      </span>
+    {% endif %}
+  {% endwith %}
 {% endwith %}

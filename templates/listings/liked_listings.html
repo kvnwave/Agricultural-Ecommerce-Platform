@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block title %}Saved listings{% endblock %}
+
+{% block content %}
+  <main class="mx-auto max-w-6xl px-4 py-8">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <h1 class="text-h3 text-fg">Saved listings</h1>
+      <a href="{% url 'listings' %}" class="text-sm text-fg/60 underline">
+        Browse produce
+      </a>
+    </div>
+
+    {% if listings %}
+      <ul class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {% for listing in listings %}
+          {% include 'listings/_listing_card.html' %}
+        {% endfor %}
+      </ul>
+
+      {% include 'partials/pagination.html' %}
+    {% else %}
+      <p class="mt-8 text-fg/60">
+        You have not saved any listings yet.
+      </p>
+    {% endif %}
+  </main>
+{% endblock %}
