@@ -124,6 +124,11 @@ class DatabaseConfigTests(SimpleTestCase):
 
         self.assertTrue(config["DISABLE_SERVER_SIDE_CURSORS"])
 
+    def test_psycopg3_prepared_statements_are_disabled(self):
+        config = database_config(POOLER_URL, ssl_require=True)
+
+        self.assertIsNone(config["OPTIONS"]["prepare_threshold"])
+
     def test_missing_url_is_rejected(self):
         with self.assertRaisesRegex(ImproperlyConfigured, "DATABASE_URL"):
             database_config("", ssl_require=True)
@@ -331,8 +336,10 @@ class TestDatabaseIsolationTests(SimpleTestCase):
 
 
 class ContentSecurityPolicyTests(TestCase):
-    def test_marketplace_sends_report_only_policy(self):
-        response = self.client.get(reverse("listings"))
+    def test_pages_send_report_only_policy(self):
+        # The middleware applies to every response. Use a route whose template
+        # exists during the frontend handoff so this only tests the header.
+        response = self.client.get(reverse("account_login"))
 
         policy = response.headers["Content-Security-Policy-Report-Only"]
 
@@ -344,6 +351,27 @@ class ContentSecurityPolicyTests(TestCase):
         self.assertIn("object-src 'none'", policy)
         self.assertIn("base-uri 'self'", policy)
         self.assertNotIn("Content-Security-Policy", response.headers)
+
+
+class ProductionSettingsTests(SimpleTestCase):
+    def test_dev_secret_key_is_not_used(self):
+        self.assertNotEqual(
+            base_settings.SECRET_KEY,
+            base_settings.INSECURE_DEV_SECRET_KEY,
+        )
+
+    def test_https_and_secure_cookies_are_enabled(self):
+        self.assertTrue(base_settings.SECURE_SSL_REDIRECT)
+        self.assertTrue(base_settings.SESSION_COOKIE_SECURE)
+        self.assertTrue(base_settings.CSRF_COOKIE_SECURE)
+        self.assertGreater(base_settings.SECURE_HSTS_SECONDS, 0)
+
+    def test_email_uses_smtp_outside_debug(self):
+        self.assertEqual(
+            base_settings.MAILERS["default"]["BACKEND"],
+            "django.core.mail.backends.smtp.EmailBackend",
+        )
+        self.assertTrue(base_settings.DEFAULT_FROM_EMAIL)
 
 
 class AdminPathTests(SimpleTestCase):

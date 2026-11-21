@@ -150,6 +150,17 @@ def database_config(url, *, ssl_require):
     # Supabase's transaction pooler cannot keep server-side cursors open
     # between statements, so Django must page results in memory.
     config["DISABLE_SERVER_SIDE_CURSORS"] = True
+
+    if parsed.scheme in POSTGRES_SCHEMES:
+        # psycopg3 uses server-side prepared statements by default. A
+        # transaction pooler can hand each statement a different backend
+        # connection, so a prepared statement may not exist where it is
+        # reused. Django 6.1 already defaults this to None, but set it
+        # explicitly for pooler deployments and older releases.
+        options = config.get("OPTIONS") or {}
+        options["prepare_threshold"] = None
+        config["OPTIONS"] = options
+
     return config
 
 
