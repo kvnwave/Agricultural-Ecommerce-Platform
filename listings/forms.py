@@ -175,6 +175,13 @@ class ListingForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+
+        # A rejected upload is missing from cleaned_data, so counting here
+        # would also add "Add at least one photo." The upload error is the
+        # actionable one; do not stack a contradictory second message on it.
+        if self.has_error("images"):
+            return cleaned_data
+
         images = cleaned_data.get("images") or []
         removed = cleaned_data.get("remove_images")
         existing = self.instance.images.count() if self.instance.pk else 0

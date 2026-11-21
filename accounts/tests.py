@@ -927,6 +927,26 @@ class AvatarTests(TestCase):
         self.assertTrue(self.user.profile.avatar)
         self.assertTrue(Path(self.user.profile.avatar.path).exists())
 
+    def test_replacing_avatar_refreshes_the_cached_url(self):
+        profile = self.user.profile
+        self.assertEqual(profile.avatar_url, "")
+
+        form = ProfileForm(
+            data={},
+            files={
+                "avatar": SimpleUploadedFile(
+                    "new.png", image_bytes(), content_type="image/png"
+                )
+            },
+            instance=profile,
+        )
+
+        self.assertTrue(form.is_valid())
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = form.save()
+
+        self.assertEqual(profile.avatar_url, profile.avatar.url)
+
     def test_replacing_avatar_deletes_the_old_file(self):
         profile = self.user.profile
         profile.avatar.save("old.png", ContentFile(image_bytes()))
@@ -966,6 +986,50 @@ class AvatarTests(TestCase):
         self.assertFalse(profile.avatar)
         self.assertFalse(storage.exists(old_name))
 
+    @override_settings(
+        SOCIALACCOUNT_PROVIDERS={
+            "google": {"APP": {"client_id": "test", "secret": "test"}}
+        }
+    )
+    def test_avatar_url_caches_the_social_account_lookup(self):
+        SocialAccount.objects.create(
+            user=self.user,
+            provider="google",
+            uid="google-1",
+            extra_data={"picture": "https://example.com/photo.jpg"},
+        )
+        profile = self.user.profile
+
+        with self.assertNumQueries(2):
+            first = profile.avatar_url
+        with self.assertNumQueries(0):
+            second = profile.avatar_url
+
+        self.assertEqual(first, "https://example.com/photo.jpg")
+        self.assertEqual(second, first)
+
+    def test_deleting_profile_removes_the_avatar_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        with self.captureOnCommitCallbacks(execute=True):
+            profile.delete()
+
+        self.assertFalse(storage.exists(name))
+
+    def test_deleting_user_removes_the_avatar_file(self):
+        profile = self.user.profile
+        profile.avatar.save("old.png", ContentFile(image_bytes()))
+        name = profile.avatar.name
+        storage = profile.avatar.storage
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.user.delete()
+
+        self.assertFalse(storage.exists(name))
+
     def test_profile_view_rejects_non_image(self):
         self.client.force_login(self.user)
 
@@ -982,3 +1046,48 @@ class AvatarTests(TestCase):
         self.assertContains(response, "Upload a valid image")
         self.user.profile.refresh_from_db()
         self.assertFalse(self.user.profile.avatar)
+
+
+class BaseNavigationTests(TestCase):
+    password = "temporary-pass-1"
+
+    def setUp(self):
+        self.buyer = User.objects.create_user(
+            "nav-buyer",
+            email="nav-buyer@example.com",
+            password=self.password,
+        )
+        self.farmer = User.objects.create_user(
+            "nav-farmer",
+            email="nav-farmer@example.com",
+            password=self.password,
+        )
+        self.farmer.profile.role = Profile.Role.FARMER
+        self.farmer.profile.save(update_fields=["role"])
+
+    def test_anonymous_navigation_offers_login_and_signup(self):
+        response = self.client.get(reverse("account_login"))
+
+        self.assertContains(response, "Log in")
+        self.assertContains(response, "Sign up")
+        self.assertNotContains(response, "Sell produce")
+        self.assertNotContains(response, "Log out")
+
+    def test_buyer_navigation_hides_farmer_links(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.get(reverse("profile"))
+
+        self.assertContains(response, "Log out")
+        self.assertContains(response, "Saved")
+        self.assertNotContains(response, "Sell produce")
+        self.assertNotContains(response, "My listings")
+
+    def test_farmer_navigation_shows_selling_links(self):
+        self.client.force_login(self.farmer)
+
+        response = self.client.get(reverse("profile"))
+
+        self.assertContains(response, "Sell produce")
+        self.assertContains(response, "My listings")
+        self.assertContains(response, "Log out")

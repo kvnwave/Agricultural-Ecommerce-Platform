@@ -141,4 +141,7 @@ class ProfileForm(forms.ModelForm):
                 lambda: storage.delete(old_avatar),
                 robust=True,
             )
+
+        # The URL was cached before the upload replaced or cleared the file.
+        profile.__dict__.pop("avatar_url", None)
         return profile

@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models.functions import Lower
+from django.utils.functional import cached_property
 
 
 def avatar_upload_path(instance, filename):
@@ -98,9 +99,13 @@ class Profile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    @property
+    @cached_property
     def avatar_url(self):
-        """An uploaded photo wins; otherwise linked Google accounts have one."""
+        """An uploaded photo wins; otherwise linked Google accounts have one.
+
+        Templates read this more than once per render. Caching the lookup
+        prevents a second social-account query on the same page.
+        """
 
         if self.avatar:
             return self.avatar.url

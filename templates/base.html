@@ -20,6 +20,35 @@
   {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-bg text-fg">
+  <header class="border-b border-fg/10">
+    <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3" aria-label="Main">
+      <a href="{% url 'listings' %}" class="text-sm font-semibold text-fg">
+        AgriMarket
+      </a>
+      <div class="flex flex-wrap items-center gap-4 text-sm text-fg/70">
+        <a href="{% url 'listings' %}" class="hover:text-fg">Browse</a>
+        {% if user.is_authenticated %}
+          <a href="{% url 'liked_listings' %}" class="hover:text-fg">Saved</a>
+          {% if user.profile.role == 'farmer' %}
+            <a href="{% url 'my_listings' %}" class="hover:text-fg">My listings</a>
+            <a href="{% url 'listing_create' %}" class="rounded bg-fg px-3 py-1.5 font-medium text-bg">
+              Sell produce
+            </a>
+          {% endif %}
+          <a href="{% url 'profile' %}" class="hover:text-fg">Profile</a>
+          <form method="post" action="{% url 'account_logout' %}" class="inline">
+            {% csrf_token %}
+            <button type="submit" class="text-fg/70 hover:text-fg">Log out</button>
+          </form>
+        {% else %}
+          <a href="{% url 'account_login' %}" class="hover:text-fg">Log in</a>
+          <a href="{% url 'account_signup' %}" class="rounded bg-fg px-3 py-1.5 font-medium text-bg">
+            Sign up
+          </a>
+        {% endif %}
+      </div>
+    </nav>
+  </header>
   {% if messages %}
     <div class="mx-auto max-w-3xl px-4 pt-4" role="status">
       {% for message in messages %}
