@@ -104,7 +104,7 @@ class Listing(models.Model):
     stock_quantity = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=0,
+        default=1,
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Available stock in the selected unit.",
     )
@@ -133,7 +133,9 @@ class Listing(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        # The id tiebreaker keeps pagination stable when two listings share a
+        # timestamp, which is common in tests and bulk imports.
+        ordering = ["-created_at", "-id"]
         indexes = [
             models.Index(
                 fields=["category", "status", "-created_at"],
@@ -155,6 +157,23 @@ class Listing(models.Model):
             models.CheckConstraint(
                 condition=models.Q(stock_quantity__gte=0),
                 name="listing_stock_non_negative",
+            ),
+            # Stock and status describe the same fact, so the database stops a
+            # listing from claiming to be active with nothing left to sell, or
+            # sold out while units remain.
+            models.CheckConstraint(
+                condition=~models.Q(
+                    status="active",
+                    stock_quantity=0,
+                ),
+                name="listing_active_requires_stock",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(
+                    status="sold_out",
+                    stock_quantity__gt=0,
+                ),
+                name="listing_sold_out_has_no_stock",
             ),
         ]
 
@@ -180,6 +199,23 @@ class Listing(models.Model):
             raise ValidationError(
                 {"meetup_location": "Add the meet-up location."}
             )
+        if (
+            self.status == self.Status.ACTIVE
+            and self.stock_quantity == 0
+        ):
+            raise ValidationError(
+                {
+                    "stock_quantity": (
+                        "Active listings need available stock. Add stock or "
+                        "mark the listing sold out."
+                    )
+                }
+            )
+        # Selecting sold out is the authoritative "nothing left" state.
+        # Clearing the counter here keeps the two fields consistent even when
+        # an admin or shell script skips the form.
+        if self.status == self.Status.SOLD_OUT and self.stock_quantity:
+            self.stock_quantity = Decimal("0")
 
     def save(self, *args, **kwargs):
         """Track when a listing becomes sold out for future like alerts."""
@@ -188,11 +224,24 @@ class Listing(models.Model):
         if update_fields is not None:
             update_fields = set(update_fields)
             kwargs["update_fields"] = update_fields
-            # Only the status column can trigger a timestamp transition. Skip
-            # both here when the caller is not writing status, including the
-            # empty-set no-op.
-            if "status" not in update_fields:
-                return super().save(*args, **kwargs)
+
+        # A full save or a status write may switch to sold out. Clear the
+        # remaining stock in the same statement so the database constraints
+        # hold for callers that skip full_clean().
+        if update_fields is None or "status" in update_fields:
+            if (
+                self.status == self.Status.SOLD_OUT
+                and self.stock_quantity != 0
+            ):
+                self.stock_quantity = Decimal("0")
+                if update_fields is not None:
+                    update_fields.add("stock_quantity")
+
+        # Only the status column can trigger a timestamp transition. Skip the
+        # rest when the caller is not writing status, including the empty-set
+        # no-op.
+        if update_fields is not None and "status" not in update_fields:
+            return super().save(*args, **kwargs)
 
         entering_sold_out = (
             self.status == self.Status.SOLD_OUT and self.sold_out_at is None

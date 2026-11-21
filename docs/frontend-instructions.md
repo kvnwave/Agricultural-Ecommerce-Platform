@@ -102,7 +102,13 @@ user. Seller names use `listing.farmer.get_full_name|default:listing.farmer.user
 in the old templates.
 
 Profiles are created by a `post_save` signal on `User`, so `user.profile` is
-always present for signed-in users.
+always present for signed-in users. `base.html` renders the main navigation:
+Browse for everyone; Saved, Profile, and a POST logout form for signed-in
+users; and My listings plus "Sell produce" only when
+`user.profile.role == 'farmer'`. Recreating a marketplace page should not add a
+second header or duplicate those links.
+`user.profile.avatar_url` is cached per profile instance for the request; read
+it once into `{% with %}` when a page needs both the emptiness check and URL.
 
 ## Route contract
 
@@ -122,9 +128,9 @@ always present for signed-in users.
 | `/accounts/` | `profile` | GET, POST | Signed in | `accounts/accounts.html` |
 | `/accounts/username/` | `username_change` | GET, POST | Signed in | `accounts/username_change.html` |
 | `/accounts/social/<provider>/start/<role>/` | `social_signup_start` | GET | Public | Redirects to the provider |
-| `/chat/` | `chat` | any (use GET) | Public | `chat/chat.html` |
-| `/analytics/` | `analytics` | any (use GET) | Public | `analytics/analytics.html` |
-| `/notifications/` | `notifications` | any (use GET) | Public | `notifications/notifications.html` |
+| `/chat/` | `chat` | GET | Signed in | `chat/chat.html` |
+| `/analytics/` | `analytics` | GET | Signed in | `analytics/analytics.html` |
+| `/notifications/` | `notifications` | GET | Signed in | `notifications/notifications.html` |
 | `/control-panel/` | `admin:index` | GET | Staff | Django admin (path configurable with `DJANGO_ADMIN_PATH`) |
 
 Allauth owns everything under `/accounts/` that is not listed above: login,
@@ -149,7 +155,8 @@ Access behaviour in the table:
 - Access: public
 - Template: `listings/listings.html`
 - Page size: 24
-- Ordering: newest first (`-created_at`)
+- Ordering: newest first (`-created_at`), with `-id` as a tiebreaker so
+  pagination does not repeat or skip listings that share a timestamp.
 - Only listings whose status is `active` or `sold_out` are included.
 
 Query parameters:
@@ -258,14 +265,17 @@ Behaviour:
 - When the request has `HX-Request: true` (htmx), the view renders
   `listings/_like_button.html` with `listing` (carrying a fresh `likes_total`)
   and `is_liked`.
-- Otherwise it redirects to `listing_detail` for the same listing, regardless
-  of which page the form was on.
+- Otherwise it redirects to the safe `next` value supplied by the form, then
+  to a same-origin `Referer`, and finally to `listing_detail` for the same
+  listing. This keeps the user on "Saved listings" or whatever page hosted the
+  button. External or malformed destinations are ignored.
 
 Form:
 
 ```django
 <form method="post" action="{% url 'listing_like_toggle' listing.public_id %}">
   {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.path }}">
   <button type="submit" aria-pressed="{{ is_liked|yesno:'true,false' }}">
     {% if is_liked %}♥ Saved{% else %}♡ Save{% endif %}
     <span>{{ listing.likes_total }}</span>
@@ -287,8 +297,8 @@ Without those attributes, the normal form POST still works.
 - Template: `listings/liked_listings.html`
 - Page size: 24
 - Includes saved listings with status `active` or `sold_out`, newest save
-  first. Each listing has a `likes_total` annotation counting likes from all
-  users.
+  first, with `-id` as the tiebreaker. Each listing has a `likes_total`
+  annotation counting likes from all users.
 
 Context: `page_obj`, `listings`. The listings include `category` and `farmer`
 select-related and `images` prefetched.
@@ -359,7 +369,7 @@ also render `form.non_field_errors`.
 | `price` | decimal | At least `0.01`. Required when `is_free` is unchecked; must be empty when `is_free` is checked. |
 | `is_free` | checkbox | Default unchecked. |
 | `unit` | select: `kg`, `g`, `sack`, `piece`, `bunch`, `crate`, `tray`, `box`, `liter`, `dozen` | Required, defaults to `kg`. |
-| `stock_quantity` | decimal | At least `0`, defaults to `0`. |
+| `stock_quantity` | decimal | At least `0`, defaults to `1`. An `active` listing needs stock greater than `0`; choosing `sold_out` clears it to `0`. |
 | `bulk_order` | checkbox | Accept larger orders than the listed stock. |
 | `meetup` | checkbox | Requires `meetup_location` when checked. |
 | `meetup_location` | text | Max 255 characters. Required when `meetup` is checked. |
@@ -536,13 +546,16 @@ Use this link when the visitor must choose a role before Google signup:
 - Views: `chat.views.chat_view`, `analytics.views.analytics_view`,
   `notifications.views.notifications_view`
 - URL names: `chat`, `analytics`, `notifications`
-- Methods: any (use `GET`)
-- Access: public (no login check)
+- Methods: `GET` only
+- Access: signed in. Anonymous requests redirect to
+  `/accounts/login/?next=<original path>`.
 - Context: none
 - Templates: `chat/chat.html`, `analytics/analytics.html`,
   `notifications/notifications.html`
 
-These are static placeholder pages with no models or logic yet.
+These are static placeholder pages with no models or logic yet. They are
+already gated behind `@login_required` so adding real data later cannot expose
+it to anonymous visitors by accident.
 
 ### Authentication pages
 
@@ -668,7 +681,7 @@ replacing `page`:
 | `price` | decimal(10,2), nullable | `None` for free listings. Minimum `0.01`. |
 | `is_free` | boolean | A database constraint requires `is_free` and `price is null` to agree. |
 | `unit` | `kg`, `g`, `sack`, `piece`, `bunch`, `crate`, `tray`, `box`, `liter`, `dozen` | Use `get_unit_display`. |
-| `stock_quantity` | decimal(10,2) | Never negative. |
+| `stock_quantity` | decimal(10,2) | Never negative; default `1`. Database constraints require `active` listings to have stock and `sold_out` listings to have none. Saving a `sold_out` listing clears the counter. |
 | `bulk_order` | boolean | |
 | `meetup` | boolean | |
 | `meetup_location` | char(255) | Required when `meetup` is true. |
@@ -767,8 +780,11 @@ a one-to-one `profile`. `Profile` has `role`, `phone`, `location`,
   listing by a handle the UI never shows.
 - `my_listings` select-relates `category`, so the dashboard does not run an
   extra query per listing.
-- Replacing a profile photo deletes the previous file after the new upload
-  commits.
+- Replacing or clearing a profile photo deletes the previous file after the
+  change commits. Deleting a profile or user removes the stored avatar too.
+- `base.html` owns the navigation and logout form. "Sell produce" is only
+  rendered for signed-in farmers, so buyers and anonymous visitors never see a
+  link that would 403 or redirect.
 
 ## Tests
 

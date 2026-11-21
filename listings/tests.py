@@ -6,6 +6,7 @@ import warnings
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
@@ -144,11 +145,73 @@ class ListingModelTests(TestCase):
         with self.assertRaises(ValidationError):
             self.make_listing(stock_quantity=Decimal("-1")).full_clean()
 
-    def test_marking_sold_out_records_timestamp(self):
-        listing = self.make_listing(status=Listing.Status.SOLD_OUT)
+    def test_active_listing_requires_stock(self):
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Active listings need available stock",
+        ):
+            self.make_listing(stock_quantity=Decimal("0")).full_clean()
+
+    def test_draft_and_archived_listings_allow_zero_stock(self):
+        for status in (Listing.Status.DRAFT, Listing.Status.ARCHIVED):
+            with self.subTest(status=status):
+                self.make_listing(
+                    status=status,
+                    stock_quantity=Decimal("0"),
+                ).full_clean()
+
+    def test_marking_sold_out_clears_stock(self):
+        listing = self.make_listing(
+            status=Listing.Status.SOLD_OUT,
+            stock_quantity=Decimal("25"),
+        )
+
+        listing.full_clean()
         listing.save()
 
+        self.assertEqual(listing.stock_quantity, Decimal("0"))
         self.assertIsNotNone(listing.sold_out_at)
+
+    def test_database_rejects_active_listing_without_stock(self):
+        listing = self.make_listing(status=Listing.Status.DRAFT)
+        listing.save()
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Listing.objects.filter(pk=listing.pk).update(
+                    status=Listing.Status.ACTIVE,
+                    stock_quantity=Decimal("0"),
+                )
+
+    def test_database_rejects_sold_out_listing_with_stock(self):
+        listing = self.make_listing()
+        listing.save()
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Listing.objects.filter(pk=listing.pk).update(
+                    status=Listing.Status.SOLD_OUT,
+                    stock_quantity=Decimal("25"),
+                )
+
+    def test_shared_timestamps_order_by_id_as_a_tiebreaker(self):
+        older_id = self.make_listing(title="Shared timestamp older")
+        older_id.save()
+        newer_id = self.make_listing(title="Shared timestamp newer")
+        newer_id.save()
+        shared = timezone.now()
+        Listing.objects.filter(pk__in=[older_id.pk, newer_id.pk]).update(
+            created_at=shared
+        )
+
+        ordered = list(
+            Listing.objects.filter(pk__in=[older_id.pk, newer_id.pk])
+        )
+
+        self.assertEqual(
+            [listing.pk for listing in ordered],
+            [newer_id.pk, older_id.pk],
+        )
 
     def test_relisting_clears_sold_out_timestamp(self):
         listing = self.make_listing(status=Listing.Status.SOLD_OUT)
@@ -156,7 +219,10 @@ class ListingModelTests(TestCase):
         sold_out_at = listing.sold_out_at
 
         listing.status = Listing.Status.ACTIVE
-        listing.save(update_fields=["status"])
+        # Relisting needs stock. A status-only save would keep the cleared
+        # counter at zero and trip the active-requires-stock constraint.
+        listing.stock_quantity = Decimal("25.00")
+        listing.save(update_fields=["status", "stock_quantity"])
         listing.refresh_from_db()
 
         self.assertIsNotNone(sold_out_at)
@@ -484,6 +550,11 @@ class ListingFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("JPEG, PNG, or WebP", form.errors["images"][0])
+        self.assertNotIn(
+            "Add at least one photo.",
+            form.errors["images"],
+            "A rejected upload must not also trigger the missing-photo error.",
+        )
 
     def test_upload_extension_matches_detected_format(self):
         upload = SimpleUploadedFile(
@@ -596,6 +667,33 @@ class ListingFormTests(TestCase):
         )
 
         self.assertTrue(form.is_valid(), form.errors)
+
+    def test_active_listing_rejects_zero_stock(self):
+        form = ListingForm(
+            data=self.valid_data(stock_quantity="0"),
+            files={"images": [uploaded_image()]},
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            "Active listings need available stock",
+            form.errors["stock_quantity"][0],
+        )
+
+    def test_saving_a_sold_out_listing_clears_stock(self):
+        form = ListingForm(
+            data=self.valid_data(
+                status=Listing.Status.SOLD_OUT,
+                stock_quantity="25",
+            ),
+            files={"images": [uploaded_image()]},
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.instance.farmer = self.farmer
+
+        listing = form.save()
+
+        self.assertEqual(listing.stock_quantity, Decimal("0"))
 
     def test_edit_accepts_existing_photo_without_new_upload(self):
         listing = Listing.objects.create(
@@ -920,6 +1018,40 @@ class ListingViewTests(TestCase):
         self.listing.refresh_from_db()
         self.assertEqual(self.listing.title, "Updated tomatoes")
         self.assertEqual(self.listing.images.count(), 1)
+
+    def test_invalid_edit_heading_keeps_the_saved_title(self):
+        self.client.force_login(self.farmer)
+
+        with tempfile.TemporaryDirectory() as template_root:
+            template_dir = Path(template_root) / "listings"
+            template_dir.mkdir()
+            (template_dir / "listing_form.html").write_text(
+                "HEADING:{{ listing.title }} BODY:{{ form.title.value }}",
+                encoding="utf-8",
+            )
+            templates = [
+                {
+                    "BACKEND": (
+                        "django.template.backends.django.DjangoTemplates"
+                    ),
+                    "DIRS": [template_root],
+                    "APP_DIRS": False,
+                    "OPTIONS": {},
+                }
+            ]
+
+            with override_settings(TEMPLATES=templates):
+                response = self.client.post(
+                    reverse(
+                        "listing_update",
+                        args=[self.listing.public_id],
+                    ),
+                    self.valid_data(title="Unsaved title", price=""),
+                )
+
+        self.assertContains(response, "HEADING:Existing tomatoes")
+        self.assertNotContains(response, "HEADING:Unsaved title")
+        self.assertContains(response, "BODY:Unsaved title")
 
     def test_non_owner_cannot_update_listing(self):
         self.client.force_login(self.other_farmer)
@@ -1367,6 +1499,48 @@ class ListingLikeViewTests(TestCase):
         detail = self.client.get(self.detail_url(self.listing))
         self.assertContains(detail, "♡ Save")
 
+    def test_like_toggle_redirects_to_posted_next(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(
+            self.like_url(self.listing),
+            {"next": reverse("liked_listings")},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("liked_listings"),
+            fetch_redirect_response=False,
+        )
+
+    def test_like_toggle_falls_back_to_safe_referer(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(
+            self.like_url(self.listing),
+            headers={"referer": reverse("liked_listings")},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("liked_listings"),
+            fetch_redirect_response=False,
+        )
+
+    def test_like_toggle_ignores_external_next(self):
+        self.client.force_login(self.buyer)
+
+        response = self.client.post(
+            self.like_url(self.listing),
+            {"next": "https://evil.example/steal"},
+        )
+
+        self.assertRedirects(
+            response,
+            self.detail_url(self.listing),
+            fetch_redirect_response=False,
+        )
+
     def test_like_toggle_returns_partial_for_htmx(self):
         self.client.force_login(self.buyer)
 
@@ -1467,6 +1641,46 @@ class ListingLikeViewTests(TestCase):
         self.assertEqual(len(second_page.context["listings"]), 1)
         self.assertContains(first_page, "Page 1 of 2")
         self.assertContains(second_page, "Page 2 of 2")
+
+    def test_liked_listings_orders_ties_by_newest_id(self):
+        first_like = ListingLike.objects.create(
+            user=self.buyer,
+            listing=self.listing,
+        )
+        second_like = ListingLike.objects.create(
+            user=self.buyer,
+            listing=self.other_listing,
+        )
+        ListingLike.objects.filter(
+            pk__in=[first_like.pk, second_like.pk]
+        ).update(created_at=timezone.now())
+
+        with tempfile.TemporaryDirectory() as template_root:
+            template_dir = Path(template_root) / "listings"
+            template_dir.mkdir()
+            (template_dir / "liked_listings.html").write_text(
+                "{% for listing in listings %}{{ listing.pk }} {% endfor %}",
+                encoding="utf-8",
+            )
+            templates = [
+                {
+                    "BACKEND": (
+                        "django.template.backends.django.DjangoTemplates"
+                    ),
+                    "DIRS": [template_root],
+                    "APP_DIRS": False,
+                    "OPTIONS": {},
+                }
+            ]
+
+            self.client.force_login(self.buyer)
+            with override_settings(TEMPLATES=templates):
+                response = self.client.get(reverse("liked_listings"))
+
+        self.assertEqual(
+            response.content.decode().split(),
+            [str(self.other_listing.pk), str(self.listing.pk)],
+        )
 
 
 class ListingAdminTests(TestCase):

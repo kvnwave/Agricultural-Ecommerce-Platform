@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+
+{% block title %}Delete listing{% endblock %}
+
+{% block content %}
+  <main class="mx-auto max-w-3xl px-4 py-8">
+    <h1 class="text-h3 text-fg">Delete “{{ listing.title }}”?</h1>
+    <p class="mt-2 text-fg/60">
+      This removes the listing, its photos, and its likes. This cannot be undone.
+    </p>
+
+    <form method="post" class="mt-6">
+      {% csrf_token %}
+      <button type="submit" class="rounded bg-red-500 px-4 py-2 text-sm font-medium text-white">
+        Delete listing
+      </button>
+      <a href="{% url 'my_listings' %}" class="ml-3 text-sm text-fg/60">Cancel</a>
+    </form>
+  </main>
+{% endblock %}
