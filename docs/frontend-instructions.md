@@ -116,7 +116,7 @@ it once into `{% with %}` when a page needs both the emptiness check and URL.
 
 | Path | URL name | Methods | Access | Template |
 | --- | --- | --- | --- | --- |
-| `/` | `home` | GET | Public | Redirects to `/listings/` |
+| `/` | `home` | GET | Public | `home.html` (temporary bare menu of links) |
 | `/listings/` | `listings` | any (use GET) | Public | `listings/listings.html` |
 | `/listings/<uuid>/` | `listing_detail` | any (use GET) | Public, with an owner exception | `listings/listing_detail.html` |
 | `/listings/<uuid>/like/` | `listing_like_toggle` | POST | Signed in | `listings/_like_button.html` (htmx) or redirect |
@@ -137,7 +137,10 @@ Allauth owns everything under `/accounts/` that is not listed above: login,
 signup, logout, email verification, password reset, email management, and
 social login. Those pages already render and need no new templates.
 
-Access behaviour in the table:
+Access behaviour in the table (with `DEBUG=True` a middleware signs anonymous
+requests in as a local `dev@example.com` farmer/staff account, so these guards
+do not redirect while a developer reviews the UI; set `DEBUG=False` to
+exercise the real behaviour):
 
 - "Signed in" uses `@login_required`. Anonymous requests are redirected to
   `/accounts/login/?next=<original path>`.
