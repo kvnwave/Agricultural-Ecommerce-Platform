@@ -2,11 +2,9 @@
 
 A Django marketplace for agricultural products. Farmers post produce listings. Buyers browse and save them.
 
-> **Frontend handoff:** the marketplace templates were removed so the frontend
-> can be rebuilt separately. The Tailwind/htmx assets and the account pages are
-> unchanged. See
-> [docs/frontend-instructions.md](docs/frontend-instructions.md) for every
-> route, URL name, context variable, and form field the views expose.
+> **Frontend handoff:** the marketplace templates are present and passing. See
+> [AGENTS.md](AGENTS.md) for the route/context/form contract, working rules,
+> and verification steps.
 
 ## Status
 
@@ -16,13 +14,12 @@ A Django marketplace for agricultural products. Farmers post produce listings. B
 | Farmer listings (create, edit, delete, up to 5 photos) | Done |
 | Browse, search, filter, like listings | Done |
 | Sold-out status with restock note | Done |
-| Marketplace frontend templates | Removed for handoff |
+| Marketplace frontend templates | Done |
 | Buyer/farmer chat | Planned |
 | Notifications (email, SMS) | Planned |
 
-`chat` and `notifications` are placeholder apps for now. Their
-views still exist, but their templates were removed with the rest of the
-marketplace frontend.
+`chat` and `notifications` are placeholder apps for now. Their views and
+login-gated placeholder templates exist, but the features are not built.
 
 ## Stack
 
@@ -30,8 +27,8 @@ marketplace frontend.
 - SQLite for local development, Supabase Postgres for production
 - Supabase Storage (S3 protocol, via django-storages) for uploaded photos
 - Tailwind CSS v4 (npm CLI) and htmx for the server-rendered pages
-- Django templates: the marketplace pages are being rebuilt separately; the
-  authentication pages still render through Django
+- Django templates: every page is server-rendered, including the marketplace,
+  account, and allauth pages
 
 ## Requirements
 
@@ -87,10 +84,8 @@ The middleware does nothing when `DEBUG=False`, so deployment still requires
 allauth login.
 
 Authentication pages render under `/accounts/` (for example,
-`/accounts/login/`). Marketplace routes return
-`TemplateDoesNotExist` until the frontend templates are restored; the required
-template paths and context variables are listed in
-[docs/frontend-instructions.md](docs/frontend-instructions.md).
+`/accounts/login/`). Marketplace pages render from `templates/listings/`; the
+route, context, and form contract is in [AGENTS.md](AGENTS.md).
 
 ## Environment Variables
 
@@ -165,38 +160,37 @@ accounts/        Custom user, profile, signup
 listings/        Categories, listings, images, likes
 chat/            Placeholder view
 notifications/   Placeholder view
-docs/            Frontend handoff instructions
-templates/       Base shell, auth pages, and the profile pages
+templates/       Base shell, marketplace pages, auth pages, and profile pages
 assets/          Tailwind source
 static/          Built CSS and vendored JavaScript
+AGENTS.md        Agent instructions and frontend contract
 ```
 
-The marketplace and placeholder templates were removed; the Tailwind source,
-built CSS, htmx, and npm files stay in place. The remaining
+All marketplace and placeholder templates are present under `templates/`.
 `templates/base.html`, `templates/account/`, `templates/socialaccount/`, and
-`templates/accounts/` files keep login, signup, email verification, password
-reset, and the profile pages working. New marketplace templates should live
-under `templates/` and extend `base.html`.
+`templates/accounts/` keep login, signup, email verification, password reset,
+and the profile pages working. New marketplace templates should live under
+`templates/` and extend `base.html`.
 
 `requirements-future.txt` pins infrastructure packages (Celery, Channels,
 Daphne) that the app does not import yet, so they stay out of the deployed
 environment until a feature needs them.
 
-## Frontend Handoff
+## Agent Instructions
 
-The frontend teammate has a complete contract in
-[docs/frontend-instructions.md](docs/frontend-instructions.md):
+The frontend teammate's agent should read [AGENTS.md](AGENTS.md) first. It
+carries the working contract:
 
-- Removed and kept template paths.
 - Every route, URL name, HTTP method, and permission rule.
 - The exact context variables each view passes, including pagination,
   search/filter values, forms, and listing/profile model fields.
 - Form fields, file-upload limits, CSRF requirements, and redirect targets.
+- The template inventory, styling rules, known traps, and definition of done.
 
-The short version: put a template at the path listed for each view, extend
-`base.html`, use `{% url %}` with the documented names, and include
-`{% csrf_token %}` in every POST form. The views already supply the variables;
-no Python changes are needed to reconnect the pages.
+The short version: keep the existing templates, extend `base.html`, use
+`{% url %}` with the documented names, and include `{% csrf_token %}` in every
+POST form. The views already supply the variables; no Python changes are needed
+for a visual change.
 
 ## Tests
 
@@ -204,10 +198,8 @@ no Python changes are needed to reconnect the pages.
 python manage.py test --settings=config.settings_test
 ```
 
-Template-dependent tests will fail until the marketplace templates are
-restored. They are intentionally left in place so they show exactly what the
-frontend needs to satisfy. Tests for models, forms, permissions, and search
-still run normally.
+The suite covers models, forms, permissions, search, and every rendered
+template. All 233 tests pass.
 
 CI runs that suite, checks for missing migrations, runs `check --deploy` with a production-like environment, verifies `collectstatic`, and audits `requirements.txt` with `pip-audit`. Dependabot and CodeQL are configured in `.github/`.
 
@@ -245,7 +237,6 @@ Removal is permanent, including the stored photos.
 | Symptom | Fix |
 | --- | --- |
 | `No DATABASE_URL environment variable set` | Add `DATABASE_URL` to `.env`. |
-| `TemplateDoesNotExist` on a marketplace route | Expected during the handoff. Create the template listed in `docs/frontend-instructions.md`. |
 | Google button missing | Set both Google credentials and restart. |
 | `redirect_uri_mismatch` | Register the exact callback URL in Google Cloud Console. |
 | CSRF failure on deployed forms | Add the `https://` origin to `CSRF_TRUSTED_ORIGINS`. |

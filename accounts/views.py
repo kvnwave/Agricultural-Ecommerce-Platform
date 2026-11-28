@@ -1,4 +1,5 @@
 from allauth.socialaccount.providers import registry
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404
@@ -85,6 +86,10 @@ def social_signup_start(request, provider, role):
     provider_ids = {provider_class.id for provider_class in registry.get_class_list()}
     if provider not in provider_ids:
         raise Http404("Unknown social provider.")
+    # Installed but without credentials: the redirect would land on a provider
+    # login that cannot start, so treat it as unavailable instead.
+    if provider not in settings.SOCIALACCOUNT_PROVIDERS:
+        raise Http404("Social provider is not configured.")
 
     try:
         login_url = reverse(f"{provider}_login")

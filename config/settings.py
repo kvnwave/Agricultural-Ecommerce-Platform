@@ -163,6 +163,11 @@ SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 # New social accounts must choose a role; the start endpoint stores it first.
 SOCIALACCOUNT_AUTO_SIGNUP = False
+# social_signup_start redirects with GET. By default allauth answers that with
+# an intermediate "Continue" page, which would turn every Google signup into a
+# three-click flow. Skipping it gives up allauth's login-CSRF confirmation; the
+# role choice is explicit and Google verifies the email address.
+SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_FORMS = {'signup': 'accounts.forms.SocialSignupForm'}
 SOCIALACCOUNT_ADAPTER = 'accounts.adapters.SocialAccountAdapter'
 

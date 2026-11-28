@@ -89,7 +89,7 @@ def listings_view(request):
 
     listings = (
         Listing.objects.filter(status__in=PUBLIC_LISTING_STATUSES)
-        .select_related("category", "farmer")
+        .select_related("category", "farmer__profile")
         .prefetch_related("images")
         .order_by("-created_at", "-id")
     )
@@ -147,9 +147,9 @@ def listings_view(request):
 def listing_detail(request, public_id):
     listing = get_object_or_404(
         with_likes_total(
-            Listing.objects.select_related("category", "farmer").prefetch_related(
-                "images"
-            )
+            Listing.objects.select_related(
+                "category", "farmer__profile"
+            ).prefetch_related("images")
         ),
         public_id=public_id,
     )
@@ -233,7 +233,7 @@ def liked_listings(request):
             likes__user=request.user,
             status__in=PUBLIC_LISTING_STATUSES,
         )
-        .select_related("category", "farmer")
+        .select_related("category", "farmer__profile")
         .prefetch_related("images")
         .order_by("-likes__created_at", "-id")
     )
