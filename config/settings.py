@@ -189,9 +189,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    # DEBUG only: sign anonymous visitors in as a local developer account so
-    # the protected pages can be reviewed. No effect when DEBUG is False.
-    'accounts.middleware.DebugAutoLoginMiddleware',
+    # TEMPORARILY DISABLED to design the authentication page.
+    # 'accounts.middleware.DebugAutoLoginMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Enforces allauth's email-verification and social-login flow state.
