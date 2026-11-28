@@ -344,6 +344,13 @@ if SUPABASE_S3_CUSTOM_DOMAIN:
 SECURE_CSP_REPORT_ONLY = {
     "default-src": [CSP.SELF],
     "img-src": csp_image_sources,
+    # The listing form geocodes meet-up locations (Nominatim) and finds
+    # nearby markets (Overpass) from the browser.
+    "connect-src": [
+        CSP.SELF,
+        "https://nominatim.openstreetmap.org",
+        "https://overpass-api.de",
+    ],
     "object-src": [CSP.NONE],
     "base-uri": [CSP.SELF],
 }

@@ -3,6 +3,12 @@
 @theme {
   --color-bg: #000000;
   --color-fg: #F6F8F9;
+  --color-leaf: #8DB355;
+  --color-leaf-deep: #7C9B46;
+  --color-paper: #FFFFFF;
+  --color-ink: #1D1A1A;
+  --color-mist: #E8EDF2;
+  --color-mute: #8B8E91;
 
   --font-sans: "Inter", sans-serif;
 
@@ -14,6 +20,191 @@
   --text-h6: 19px;
   --text-body: 16px;
   --text-small: 13px;
+}
+
+/* Listing form ("List an item" sheet). The checkboxes behind the toggles
+   stay in the tab order but are painted by their wrapper instead. */
+#listing-form input[name="is_free"],
+#listing-form input[name="bulk_order"],
+#listing-form input[name="meetup"],
+#listing-form input[name="direct_to_market"],
+#listing-form input[name="delivery"],
+#listing-form input[name="remove_images"],
+#listing-form label[for="id_images"] input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* For Sale / For Free segmented toggle */
+.price-toggle:has(input:checked) .for-free,
+.price-toggle:has(input:not(:checked)) .for-sale {
+  background-color: var(--color-leaf);
+  color: #ffffff;
+}
+
+.price-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--color-leaf);
+  outline-offset: 2px;
+}
+
+/* On/off switches (bulk order, meet-up, direct to market, delivery) */
+.switch {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background-color: var(--color-mute);
+  transition: background-color 0.15s ease;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background-color: #ffffff;
+  transition: transform 0.15s ease;
+}
+
+.switch:has(input:checked) .switch-track {
+  background-color: var(--color-leaf);
+}
+
+.switch:has(input:checked) .switch-knob {
+  transform: translateX(18px);
+}
+
+.switch:has(input:focus-visible) .switch-track {
+  outline: 2px solid var(--color-leaf);
+  outline-offset: 2px;
+}
+
+/* Meet-up details follow the meet-up switch */
+.meetup-details {
+  display: none;
+}
+
+.meetup-block:has(input[name="meetup"]:checked) .meetup-details {
+  display: block;
+}
+
+/* Notes revealed by the delivery and direct-to-market switches */
+.delivery-note,
+.market-note {
+  display: none;
+}
+
+.delivery-block:has(input[name="delivery"]:checked) .delivery-note,
+.market-block:has(input[name="direct_to_market"]:checked) .market-note {
+  display: block;
+}
+
+/* Themed selects: replace native chrome with the sheet's chevron */
+#listing-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.75rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238B8E91' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px 16px;
+}
+
+#listing-form select option {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/* Meet-up location autocomplete dropdown */
+.location-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  margin-top: 4px;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--color-mist);
+  border-radius: 12px;
+  background-color: var(--color-paper);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  list-style: none;
+}
+
+.location-suggestions button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.location-suggestions button:hover,
+.location-suggestions button.is-active {
+  background-color: var(--color-mist);
+}
+
+/* Condition pills */
+.condition-pill {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.condition-pill input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.condition-pill span {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.condition-pill:has(input:checked) span {
+  background-color: var(--color-leaf);
+  border-color: var(--color-leaf);
+  color: #ffffff;
+}
+
+.condition-pill:has(input:focus-visible) span {
+  outline: 2px solid var(--color-leaf);
+  outline-offset: 2px;
+}
+
+/* Photo drop zone and remove-photo controls */
+#listing-form label[for="id_images"]:focus-within {
+  outline: 2px solid var(--color-leaf);
+  outline-offset: 2px;
+}
+
+#listing-form li:has(input[name="remove_images"]:focus-visible)
+  label[for^="id_remove_images"] {
+  outline: 2px solid var(--color-leaf);
+  outline-offset: 2px;
 }
 
 /* Table responsiveness */

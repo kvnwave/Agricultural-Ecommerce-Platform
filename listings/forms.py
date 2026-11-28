@@ -169,6 +169,50 @@ class ListingForm(forms.ModelForm):
         else:
             self.fields.pop("remove_images")
 
+        # The template renders condition as radio pills instead of a dropdown.
+        # Choices live on the widget instance, so pass them to the new one.
+        condition = self.fields["condition"]
+        condition.widget = forms.RadioSelect(choices=condition.choices)
+
+        field_class = (
+            "w-full rounded-xl border border-mist bg-paper px-3.5 py-2.5 "
+            "text-sm text-ink placeholder:text-mute focus:border-leaf "
+            "focus:outline-none focus:ring-2 focus:ring-leaf/40"
+        )
+        placeholders = {
+            "title": "Listing title",
+            "description": "Describe your produce",
+            "price": "Price of your listing",
+            "meetup_location": "Search location",
+            "meetup_notes": "Add notes for the buyer",
+            "status_note": "Tell buyers when you expect to restock",
+        }
+        for name, field in self.fields.items():
+            if name in {"images", "condition", "remove_images"}:
+                continue
+            widget = field.widget
+            if isinstance(
+                widget, (forms.CheckboxInput, forms.CheckboxSelectMultiple)
+            ):
+                continue
+            if isinstance(widget, forms.Textarea):
+                widget.attrs.setdefault("rows", "4")
+                # Buyer-facing notes stay compact; the description keeps 4.
+                if name == "meetup_notes":
+                    widget.attrs["rows"] = "2"
+            widget.attrs.setdefault("class", field_class)
+            if name == "price":
+                widget.attrs["class"] += " pl-9"
+                widget.attrs.setdefault("min", "0.01")
+                widget.attrs.setdefault("step", "0.01")
+            elif name == "meetup_location":
+                widget.attrs["class"] += " pr-10"
+            elif name == "stock_quantity":
+                widget.attrs.setdefault("min", "0")
+                widget.attrs.setdefault("step", "0.01")
+            if name in placeholders:
+                widget.attrs.setdefault("placeholder", placeholders[name])
+
     def clean_images(self):
         images = self.cleaned_data.get("images") or []
         return [_scrub_image(image) for image in images]

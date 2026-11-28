@@ -3,32 +3,521 @@
 {% block title %}{% if is_edit %}Edit listing{% else %}List an item{% endif %}{% endblock %}
 
 {% block content %}
-  <main class="mx-auto max-w-3xl px-4 py-8">
-    <h1 class="text-h3 text-fg">
-      {% if is_edit %}Edit listing{% else %}List an item{% endif %}
-    </h1>
+  <main class="px-4 py-8 sm:px-6 lg:px-8">
+    <div class="overflow-hidden rounded-2xl bg-paper text-ink shadow-xl shadow-black/40">
+      <form id="listing-form" method="post" enctype="multipart/form-data" class="divide-y divide-mist">
+        {% csrf_token %}
 
-    {% if is_edit %}
-      <p class="mt-2 text-fg/60">Editing “{{ listing.title }}”.</p>
-      {% if listing.images.exists %}
-        <ul class="mt-4 flex flex-wrap gap-3">
-          {% for image in listing.images.all %}
-            <li>
-              <img src="{{ image.image.url }}" alt="{{ image.alt_text|default:listing.title }}" class="h-24 w-24 rounded object-cover">
-              <span class="block text-xs text-fg/60">Position {{ image.position }}</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% endif %}
-    {% endif %}
+        <header class="flex items-center justify-between gap-4 px-5 py-4">
+          <div class="flex min-w-0 items-center gap-3">
+            <a href="{% url 'my_listings' %}" aria-label="Back to my listings"
+               class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-mute hover:bg-mist hover:text-ink">
+              <svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 12H5"/>
+                <path d="m12 19-7-7 7-7"/>
+              </svg>
+            </a>
+            <h1 class="truncate text-h6 font-semibold">
+              {% if is_edit %}Edit listing{% else %}List an item{% endif %}
+            </h1>
+          </div>
+          <button type="reset" class="shrink-0 text-sm text-mute hover:text-ink">Clear details</button>
+        </header>
 
-    <form method="post" enctype="multipart/form-data" class="mt-6 space-y-4">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
-        {% if is_edit %}Save changes{% else %}List now{% endif %}
-      </button>
-      <a href="{% url 'my_listings' %}" class="ml-3 text-sm text-fg/60">Cancel</a>
-    </form>
+        {% if form.non_field_errors %}
+          <div class="px-5 py-4 text-sm text-red-600" role="alert">
+            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+          </div>
+        {% endif %}
+
+        <section class="px-5 py-6">
+          <label for="{{ form.images.id_for_label }}"
+                 class="block cursor-pointer rounded-xl border-2 border-dashed border-leaf/40 bg-leaf/10 px-4 py-8 text-center">
+            <span aria-hidden="true" class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-leaf/15 text-leaf">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                <circle cx="8.5" cy="10" r="1.5"/>
+                <path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 20"/>
+              </svg>
+            </span>
+            <span class="inline-block rounded-full bg-leaf px-6 py-2 text-sm font-medium text-white">Select photos</span>
+            <span class="mt-2 block text-xs text-mute">(Up to 5 photos)</span>
+            {{ form.images }}
+          </label>
+          {% for error in form.images.errors %}<p class="mt-2 text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+          <ul id="photo-previews" class="mt-4 flex flex-wrap gap-3"></ul>
+
+          {% if form.remove_images %}
+            <ul class="mt-4 flex flex-wrap gap-3">
+              {% for image in listing.images.all %}
+                {% for checkbox in form.remove_images %}
+                  {% if image.pk|stringformat:"s" == checkbox.data.value|stringformat:"s" %}
+                    <li class="relative">
+                      <img src="{{ image.image.url }}" alt="{{ image.alt_text|default:listing.title }}"
+                           class="h-24 w-24 rounded-lg border border-mist object-cover">
+                      {% if forloop.parentloop.counter0 == 0 %}
+                        <span class="absolute bottom-1 left-1 rounded bg-ink/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">COVER</span>
+                      {% endif %}
+                      <label for="{{ checkbox.id_for_label }}" title="Remove photo"
+                             class="absolute -right-2 -top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-ink text-white shadow">
+                        <svg aria-hidden="true" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M3 6h18"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <path d="M10 11v6"/>
+                          <path d="M14 11v6"/>
+                        </svg>
+                        <span class="sr-only">Remove photo</span>
+                      </label>
+                      {{ checkbox.tag }}
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            </ul>
+            {% for error in form.remove_images.errors %}<p class="mt-2 text-sm text-red-600">{{ error }}</p>{% endfor %}
+          {% endif %}
+        </section>
+
+        <section class="space-y-4 px-5 py-6">
+          <div>
+            <label for="{{ form.category.id_for_label }}" class="mb-1.5 block text-sm font-medium">Category</label>
+            {{ form.category }}
+            {% for error in form.category.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+          </div>
+
+          <div>
+            <label for="{{ form.title.id_for_label }}" class="mb-1.5 block text-sm font-medium">Listing title</label>
+            {{ form.title }}
+            {% for error in form.title.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+          </div>
+
+          <fieldset>
+            <legend class="text-sm font-medium">Condition</legend>
+            <div class="mt-2 flex flex-wrap gap-2">
+              {% for radio in form.condition %}
+                <label class="condition-pill">
+                  {{ radio.tag }}
+                  <span class="inline-block rounded-full border border-leaf/60 px-4 py-1.5 text-sm text-ink">{{ radio.choice_label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            {% for error in form.condition.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+          </fieldset>
+
+          <div>
+            <label for="{{ form.description.id_for_label }}" class="mb-1.5 block text-sm font-medium">Description</label>
+            {{ form.description }}
+            {% for error in form.description.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+          </div>
+        </section>
+
+        <section class="space-y-4 px-5 py-6">
+          <h2 class="text-sm font-semibold">Price</h2>
+
+          <div class="price-toggle relative grid grid-cols-2 gap-1 rounded-full border border-leaf/50 p-1">
+            <label for="{{ form.is_free.id_for_label }}" aria-hidden="true"
+                   class="for-sale z-10 cursor-pointer rounded-full px-4 py-1.5 text-center text-sm font-medium text-ink">For Sale</label>
+            <label for="{{ form.is_free.id_for_label }}"
+                   class="for-free z-10 cursor-pointer rounded-full px-4 py-1.5 text-center text-sm font-medium text-ink">For Free</label>
+            {{ form.is_free }}
+          </div>
+          {% for error in form.is_free.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+          <div class="relative">
+            <span aria-hidden="true" class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-mute">₱</span>
+            {{ form.price }}
+          </div>
+          {% for error in form.price.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label for="{{ form.unit.id_for_label }}" class="mb-1.5 block text-sm font-medium">Unit</label>
+              {{ form.unit }}
+              {% for error in form.unit.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+            </div>
+            <div>
+              <label for="{{ form.stock_quantity.id_for_label }}" class="mb-1.5 block text-sm font-medium">Stock quantity</label>
+              {{ form.stock_quantity }}
+              {% for error in form.stock_quantity.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+            </div>
+          </div>
+        </section>
+
+        <section class="space-y-4 px-5 py-6">
+          <h2 class="text-sm font-semibold">Deal Method</h2>
+
+          <label for="{{ form.bulk_order.id_for_label }}" class="flex cursor-pointer items-center justify-between gap-4">
+            <span>
+              <span class="block text-sm font-medium">Bulk order</span>
+              <span class="block text-xs text-mute">Accept larger orders of this produce</span>
+            </span>
+            <span class="switch shrink-0">
+              {{ form.bulk_order }}
+              <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            </span>
+          </label>
+          {% for error in form.bulk_order.errors %}<p class="text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+          <div class="meetup-block">
+            <label for="{{ form.meetup.id_for_label }}" class="flex cursor-pointer items-center justify-between gap-4">
+              <span class="text-sm font-medium">Meet-up</span>
+              <span class="switch shrink-0">
+                {{ form.meetup }}
+                <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              </span>
+            </label>
+            {% for error in form.meetup.errors %}<p class="text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+            <div class="meetup-details mt-3 space-y-3">
+              <div>
+                <label for="{{ form.meetup_location.id_for_label }}" class="mb-1.5 block text-sm font-medium">Meet-up location</label>
+                <div class="relative">
+                  {{ form.meetup_location }}
+                  <svg aria-hidden="true" class="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"/>
+                    <path d="m21 21-4.3-4.3"/>
+                  </svg>
+                  <ul id="location-suggestions" class="location-suggestions hidden" role="listbox" aria-label="Location suggestions"></ul>
+                </div>
+                {% for error in form.meetup_location.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+              </div>
+              <div>
+                <label for="{{ form.meetup_notes.id_for_label }}" class="mb-1.5 block text-sm font-medium text-mute">Add notes</label>
+                {{ form.meetup_notes }}
+                {% for error in form.meetup_notes.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+              </div>
+            </div>
+          </div>
+
+          <div class="market-block">
+            <label for="{{ form.direct_to_market.id_for_label }}" class="flex cursor-pointer items-center justify-between gap-4">
+              <span class="text-sm font-medium">Direct to market</span>
+              <span class="switch shrink-0">
+                {{ form.direct_to_market }}
+                <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              </span>
+            </label>
+            {% for error in form.direct_to_market.errors %}<p class="text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+            <div class="market-note mt-3 rounded-xl border border-mist bg-mist/40 px-4 py-3">
+              <p class="market-status text-sm text-ink" role="status">Finding markets near you…</p>
+              <ul class="market-list mt-2 space-y-1.5"></ul>
+              <button type="button" class="market-retry mt-2 hidden rounded-full border border-leaf/60 px-3 py-1 text-xs font-medium text-ink hover:bg-leaf/10">Try again</button>
+            </div>
+          </div>
+
+          <div class="delivery-block">
+            <label for="{{ form.delivery.id_for_label }}" class="flex cursor-pointer items-center justify-between gap-4">
+              <span class="text-sm font-medium">Delivery</span>
+              <span class="switch shrink-0">
+                {{ form.delivery }}
+                <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              </span>
+            </label>
+            {% for error in form.delivery.errors %}<p class="text-sm text-red-600">{{ error }}</p>{% endfor %}
+
+            <p class="delivery-note mt-2 text-xs text-mute">Buyers can request delivery — you'll arrange the drop-off details after purchase.</p>
+          </div>
+        </section>
+
+        {# Hidden on create; fields stay in the DOM so the POST contract is unchanged. #}
+        <section class="space-y-4 px-5 py-6{% if not is_edit %} hidden{% endif %}">
+          <h2 class="text-sm font-semibold">Status</h2>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label for="{{ form.status.id_for_label }}" class="mb-1.5 block text-sm font-medium">Listing status</label>
+              {{ form.status }}
+              {% for error in form.status.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+            </div>
+            <div>
+              <label for="{{ form.status_note.id_for_label }}" class="mb-1.5 block text-sm font-medium">Restock note</label>
+              {{ form.status_note }}
+              {% for error in form.status_note.errors %}<p class="mt-1.5 text-sm text-red-600">{{ error }}</p>{% endfor %}
+            </div>
+          </div>
+        </section>
+
+        <footer class="px-5 py-5">
+          <button type="submit"
+                  class="w-full rounded-xl bg-leaf px-4 py-3 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
+            {% if is_edit %}Save changes{% else %}List now{% endif %}
+          </button>
+          <a href="{% url 'my_listings' %}" class="mt-3 block text-center text-sm text-mute hover:text-ink">Cancel</a>
+        </footer>
+      </form>
+    </div>
   </main>
+{% endblock %}
+
+{% block extra_body %}
+  <script>
+    (function () {
+      var form = document.getElementById('listing-form');
+      if (!form) return;
+
+      var price = document.getElementById('id_price');
+      var free = document.getElementById('id_is_free');
+
+      function syncFree() {
+        if (!price || !free) return;
+        price.disabled = free.checked;
+        price.parentElement.classList.toggle('hidden', free.checked);
+      }
+
+      if (price && free) {
+        free.addEventListener('change', syncFree);
+        syncFree();
+      }
+
+      var input = document.getElementById('id_images');
+      var list = document.getElementById('photo-previews');
+
+      if (input && list) {
+        function renderPreviews() {
+          list.textContent = '';
+          Array.prototype.forEach.call(input.files, function (file, index) {
+            var item = document.createElement('li');
+            item.className = 'relative';
+            if (index === 0) {
+              var cover = document.createElement('span');
+              cover.className = 'absolute bottom-1 left-1 rounded bg-ink/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white';
+              cover.textContent = 'COVER';
+              item.appendChild(cover);
+            }
+            var image = document.createElement('img');
+            image.src = URL.createObjectURL(file);
+            image.alt = file.name;
+            image.className = 'h-24 w-24 rounded-lg border border-mist object-cover';
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs text-white shadow';
+            remove.textContent = '\u00d7';
+            remove.setAttribute('aria-label', 'Remove ' + file.name);
+            remove.addEventListener('click', function () {
+              var transfer = new DataTransfer();
+              Array.prototype.forEach.call(input.files, function (file, fileIndex) {
+                if (fileIndex !== index) transfer.items.add(file);
+              });
+              input.files = transfer.files;
+              renderPreviews();
+            });
+            item.appendChild(image);
+            item.appendChild(remove);
+            list.appendChild(item);
+          });
+        }
+
+        input.addEventListener('change', renderPreviews);
+        form.addEventListener('reset', function () {
+          setTimeout(function () {
+            renderPreviews();
+            syncFree();
+          }, 0);
+        });
+      }
+
+      var locationInput = document.getElementById('id_meetup_location');
+      var suggestionList = document.getElementById('location-suggestions');
+
+      if (locationInput && suggestionList) {
+        var locationTimer = null;
+
+        function closeSuggestions() {
+          suggestionList.classList.add('hidden');
+          suggestionList.textContent = '';
+        }
+
+        function chooseSuggestion(item) {
+          locationInput.value = item.display_name;
+          closeSuggestions();
+          locationInput.focus();
+        }
+
+        function renderSuggestions(items) {
+          suggestionList.textContent = '';
+          items.forEach(function (item, index) {
+            var entry = document.createElement('li');
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.setAttribute('role', 'option');
+            button.id = 'location-suggestion-' + index;
+            button.textContent = item.display_name;
+            button.addEventListener('click', function () {
+              chooseSuggestion(item);
+            });
+            entry.appendChild(button);
+            suggestionList.appendChild(entry);
+          });
+          suggestionList.classList.remove('hidden');
+        }
+
+        locationInput.addEventListener('input', function () {
+          clearTimeout(locationTimer);
+          var query = locationInput.value.trim();
+          if (query.length < 3) {
+            closeSuggestions();
+            return;
+          }
+          locationTimer = setTimeout(function () {
+            var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=ph&limit=5&accept-language=en&q='
+              + encodeURIComponent(query);
+            fetch(url)
+              .then(function (response) {
+                if (!response.ok) throw new Error('nominatim ' + response.status);
+                return response.json();
+              })
+              .then(function (results) {
+                if (locationInput.value.trim() !== query) return;
+                if (!results.length) {
+                  closeSuggestions();
+                  return;
+                }
+                renderSuggestions(results);
+              })
+              .catch(function () {
+                closeSuggestions();
+              });
+          }, 350);
+        });
+
+        locationInput.addEventListener('keydown', function (event) {
+          var buttons = suggestionList.querySelectorAll('button');
+          if (!buttons.length) return;
+          var active = suggestionList.querySelector('button.is-active');
+          var index = active ? Array.prototype.indexOf.call(buttons, active) : -1;
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            index = (index + 1) % buttons.length;
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            index = (index - 1 + buttons.length) % buttons.length;
+          } else if (event.key === 'Enter') {
+            if (index >= 0) {
+              event.preventDefault();
+              buttons[index].click();
+              return;
+            }
+            return;
+          } else if (event.key === 'Escape') {
+            closeSuggestions();
+            return;
+          } else {
+            return;
+          }
+          if (active) active.classList.remove('is-active');
+          buttons[index].classList.add('is-active');
+        });
+
+        document.addEventListener('click', function (event) {
+          if (event.target !== locationInput && !suggestionList.contains(event.target)) {
+            closeSuggestions();
+          }
+        });
+      }
+
+      var marketToggle = document.getElementById('id_direct_to_market');
+      var marketStatus = document.querySelector('.market-status');
+      var marketListEl = document.querySelector('.market-list');
+      var marketRetry = document.querySelector('.market-retry');
+      var marketsCache = null;
+
+      if (marketToggle && marketStatus && marketListEl && marketRetry) {
+        function distanceKm(lat1, lon1, lat2, lon2) {
+          var earth = 6371;
+          var dLat = (lat2 - lat1) * Math.PI / 180;
+          var dLon = (lon2 - lon1) * Math.PI / 180;
+          var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+            + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+            * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          return earth * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function showMarketError(message) {
+          marketStatus.textContent = message;
+          marketListEl.textContent = '';
+          marketRetry.classList.remove('hidden');
+        }
+
+        function renderMarkets(elements, lat, lon) {
+          var unique = [];
+          var seen = {};
+          elements.forEach(function (element) {
+            var name = element.tags && element.tags.name ? element.tags.name.trim() : '';
+            var key = name.toLowerCase();
+            if (!name || seen[key]) return;
+            seen[key] = true;
+            unique.push({ name: name, lat: element.lat, lon: element.lon });
+          });
+          unique.sort(function (a, b) {
+            return distanceKm(lat, lon, a.lat, a.lon) - distanceKm(lat, lon, b.lat, b.lon);
+          });
+          if (!unique.length) {
+            showMarketError('No public markets found within 25 km.');
+            return;
+          }
+          marketRetry.classList.add('hidden');
+          marketStatus.textContent = 'Markets near you';
+          marketListEl.textContent = '';
+          unique.slice(0, 8).forEach(function (market) {
+            var item = document.createElement('li');
+            item.className = 'flex items-baseline justify-between gap-3';
+            var name = document.createElement('span');
+            name.textContent = market.name;
+            var distance = document.createElement('span');
+            distance.className = 'shrink-0 text-xs text-mute';
+            distance.textContent = distanceKm(lat, lon, market.lat, market.lon).toFixed(1) + ' km';
+            item.appendChild(name);
+            item.appendChild(distance);
+            marketListEl.appendChild(item);
+          });
+        }
+
+        function loadMarkets() {
+          marketRetry.classList.add('hidden');
+          marketStatus.textContent = 'Finding markets near you…';
+          marketListEl.textContent = '';
+          if (marketsCache) {
+            renderMarkets(marketsCache.elements, marketsCache.lat, marketsCache.lon);
+            return;
+          }
+          if (!navigator.geolocation) {
+            showMarketError('Your browser does not support location services.');
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(function (position) {
+            var lat = position.coords.latitude;
+            var lon = position.coords.longitude;
+            var query = '[out:json][timeout:15];(node["amenity"="marketplace"](around:25000,'
+              + lat + ',' + lon + ');way["amenity"="marketplace"](around:25000,'
+              + lat + ',' + lon + '););out center 30;';
+            fetch('https://overpass-api.de/api/interpreter', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: 'data=' + encodeURIComponent(query)
+            })
+              .then(function (response) {
+                if (!response.ok) throw new Error('overpass ' + response.status);
+                return response.json();
+              })
+              .then(function (data) {
+                marketsCache = { elements: data.elements || [], lat: lat, lon: lon };
+                renderMarkets(marketsCache.elements, lat, lon);
+              })
+              .catch(function () {
+                showMarketError("Couldn't load nearby markets right now.");
+              });
+          }, function () {
+            showMarketError('Allow location access to see markets near you.');
+          }, { timeout: 10000, maximumAge: 300000 });
+        }
+
+        marketToggle.addEventListener('change', function () {
+          if (marketToggle.checked) loadMarkets();
+        });
+        marketRetry.addEventListener('click', loadMarkets);
+      }
+    })();
+  </script>
 {% endblock %}

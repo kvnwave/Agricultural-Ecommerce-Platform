@@ -448,7 +448,23 @@ The form must use:
 ```
 
 `{{ form.as_p }}` renders non-field errors. If you render fields manually,
-also render `form.non_field_errors`.
+also render `form.non_field_errors`. The current template renders the fields
+manually: `condition` as radio pills, `is_free` as a For Sale / For Free
+segmented toggle, and `bulk_order`, `meetup`, `direct_to_market`, and
+`delivery` as on/off switches styled in CSS. It renders `non_field_errors` and
+per-field errors, a `Clear details` reset button, and the `remove_images`
+checkboxes as trash buttons overlaid on the existing photo thumbnails. The
+card is full-width (no `max-w` cap). The Status section (`status`,
+`status_note`) is hidden on create and shown only when editing; the fields
+stay in the DOM so the POST contract is unchanged and `status` keeps its
+`active` default. The meet-up location input has a client-side Nominatim
+(OpenStreetMap) autocomplete limited to the Philippines. Toggling
+`direct_to_market` reveals nearby public markets via browser geolocation and
+the Overpass API, with a graceful note and retry when location is denied;
+toggling `delivery` reveals an explanatory note. Both reveals are CSS-only,
+matching the meet-up reveal. Selects use an on-theme custom chevron
+(`appearance: none` plus a mute SVG arrow in `input.css`) instead of native
+browser chrome.
 
 `ListingForm` fields, in display order:
 
@@ -456,16 +472,16 @@ also render `form.non_field_errors`.
 | --- | --- | --- |
 | `title` | text | Required, max 120 characters |
 | `category` | select of `Category` | Required |
-| `condition` | `fresh`, `ripe`, `blemished`, `overripe`, `processing` | Required, defaults to `fresh` |
+| `condition` | radio pills (`RadioSelect`); `fresh`, `ripe`, `blemished`, `overripe`, `processing` | Required, defaults to `fresh` |
 | `description` | textarea | Required |
-| `price` | decimal | At least `0.01`; required when `is_free` is unchecked; must be empty when `is_free` is checked |
-| `is_free` | checkbox | Default unchecked |
+| `price` | decimal | At least `0.01`; required when `is_free` is unchecked; must be empty when `is_free` is checked. Rendered with a ₱ prefix and hidden (still in the DOM) while `is_free` is checked; its errors render outside the hidden wrapper |
+| `is_free` | checkbox, rendered as a For Sale / For Free toggle | Default unchecked |
 | `unit` | `kg`, `g`, `sack`, `piece`, `bunch`, `crate`, `tray`, `box`, `liter`, `dozen` | Required, defaults to `kg` |
 | `stock_quantity` | decimal | At least `0`, defaults to `1`; `active` needs stock greater than 0; `sold_out` clears it to 0 |
 | `bulk_order` | checkbox | Accept larger orders than listed stock |
 | `meetup` | checkbox | Requires `meetup_location` when checked |
-| `meetup_location` | text | Max 255 characters; required when `meetup` is checked |
-| `meetup_notes` | textarea | Optional |
+| `meetup_location` | text | Max 255 characters; required when `meetup` is checked; browser autocompletes real PH places via Nominatim |
+| `meetup_notes` | textarea | Optional; rendered at 2 rows |
 | `direct_to_market` | checkbox | Optional |
 | `delivery` | checkbox | Optional |
 | `status` | `draft`, `active`, `sold_out`, `archived` | Required, defaults to `active` |
@@ -723,6 +739,14 @@ and a one-to-one `profile`. `Profile` has `role`, `phone`, `location`,
 - `npm run watch` rebuilds on change; `npm run build` builds once.
 - Theme tokens: `bg` (`#000000`), `fg` (`#F6F8F9`), font `Inter`, and text
   sizes `text-h1` through `text-h6`, `text-body`, `text-small`.
+- The listing form ("List an item" sheet) adds tokens: `leaf` (`#8DB355`),
+  `leaf-deep` (`#7C9B46`), `paper` (`#FFFFFF`), `ink` (`#1D1A1A`),
+  `mist` (`#E8EDF2`), and `mute` (`#8B8E91`). It renders as a light card on
+  the dark page background; the toggles, pills, and photo previews are styled
+  by component rules in `input.css` under the `#listing-form` scope. The CSP
+  report-only policy allows `connect-src` to Nominatim and Overpass for the
+  form's geocoding and nearby-markets lookups; keep those entries if the CSP
+  is enforced.
 - Below 640px, `input.css` shrinks `h1`/`h2`, pads `body`, and pads
   `.container`. `.data-table` cells shrink below 768px.
 - Any class not already in `output.css` renders unstyled until you rebuild.
