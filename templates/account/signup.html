@@ -1,0 +1,58 @@
+{% extends "account/base_entrance.html" %}
+{% load socialaccount %}
+{% comment %}
+  allauth's signup page with the marketplace account type and Google buttons.
+
+  `form` is `accounts.forms.SignupForm` (role, optional username, email,
+  password). The Google links go through `social_signup_start` so the role is
+  stored in the session before the OAuth handshake; the social signup form
+  then arrives with that role preselected.
+{% endcomment %}
+
+{% block head_title %}Signup{% endblock %}
+
+{% block content %}
+  <main class="mx-auto max-w-md px-4 py-8">
+    <h1 class="text-h3 text-fg">Sign Up</h1>
+    <p class="mt-2 text-fg/60">
+      Already have an account?
+      <a href="{{ login_url }}" class="underline">Sign in</a>.
+    </p>
+
+    <form method="post" action="{% url 'account_signup' %}" class="mt-6 space-y-4">
+      {% csrf_token %}
+      {{ redirect_field }}
+      {{ form.as_p }}
+      <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+        Sign Up
+      </button>
+    </form>
+
+    {% get_providers as socialaccount_providers %}
+    {% for provider in socialaccount_providers %}
+      {% if provider.id == "google" %}
+        <section class="mt-8 border-t border-fg/10 pt-6">
+          <h2 class="text-h5 text-fg">Sign up with Google</h2>
+          <p class="mt-1 text-sm text-fg/60">
+            Choose the account type first. Google confirms your email, then the
+            next step asks for a username.
+          </p>
+          <div class="mt-3 flex flex-wrap gap-3">
+            <a
+              href="{% url 'social_signup_start' 'google' 'buyer' %}"
+              class="rounded border border-fg/20 px-4 py-2 text-sm font-medium text-fg"
+            >
+              Sign up as a buyer
+            </a>
+            <a
+              href="{% url 'social_signup_start' 'google' 'farmer' %}"
+              class="rounded border border-fg/20 px-4 py-2 text-sm font-medium text-fg"
+            >
+              Sign up as a farmer
+            </a>
+          </div>
+        </section>
+      {% endif %}
+    {% endfor %}
+  </main>
+{% endblock %}

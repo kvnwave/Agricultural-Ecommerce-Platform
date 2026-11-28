@@ -696,6 +696,11 @@ class SignupFlowTests(TestCase):
         self.assertFalse(User.objects.filter(email="no-role@example.com").exists())
 
 
+@override_settings(
+    SOCIALACCOUNT_PROVIDERS={
+        "google": {"APP": {"client_id": "test", "secret": "test"}}
+    }
+)
 class SocialSignupRoleTests(TestCase):
     def sociallogin(self):
         return SocialLogin(user=User(email="social@example.com"))
@@ -730,6 +735,28 @@ class SocialSignupRoleTests(TestCase):
                     reverse("social_signup_start", kwargs=kwargs)
                 )
                 self.assertEqual(response.status_code, 404)
+
+    @override_settings(SOCIALACCOUNT_PROVIDERS={})
+    def test_start_rejects_provider_without_credentials(self):
+        response = self.client.get(
+            reverse(
+                "social_signup_start",
+                kwargs={"provider": "google", "role": Profile.Role.BUYER},
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_signup_page_links_google_to_role_start(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertContains(
+            response,
+            reverse(
+                "social_signup_start",
+                kwargs={"provider": "google", "role": Profile.Role.FARMER},
+            ),
+        )
 
     def test_social_signup_view_uses_custom_form(self):
         from allauth.socialaccount.views import SignupView
