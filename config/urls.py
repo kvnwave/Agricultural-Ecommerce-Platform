@@ -21,7 +21,6 @@ from django.urls import include, path
 from django.views.generic import TemplateView
 
 from accounts import views as accounts_views
-from analytics import views as analytics_views
 from chat import views as chat_views
 from notifications import views as notifications_views
 
@@ -47,7 +46,6 @@ urlpatterns = [
     ),
     # allauth owns login, signup, verification, password reset, and social login.
     path('accounts/', include('allauth.urls')),
-    path('analytics/', analytics_views.analytics_view, name='analytics'),
     path('chat/', chat_views.chat_view, name='chat'),
     path('listings/', include('listings.urls')),
     path('notifications/', notifications_views.notifications_view, name='notifications'),
