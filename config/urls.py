@@ -18,7 +18,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
-from django.views.generic import RedirectView
+from django.views.generic import TemplateView
 
 from accounts import views as accounts_views
 from analytics import views as analytics_views
@@ -26,9 +26,10 @@ from chat import views as chat_views
 from notifications import views as notifications_views
 
 urlpatterns = [
+    # Temporary main page: a bare menu of links, no header or navigation.
     path(
         '',
-        RedirectView.as_view(pattern_name='listings', permanent=False),
+        TemplateView.as_view(template_name='home.html'),
         name='home',
     ),
     path(settings.DJANGO_ADMIN_PATH, admin.site.urls),

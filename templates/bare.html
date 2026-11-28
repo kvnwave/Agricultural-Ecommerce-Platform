@@ -1,0 +1,16 @@
+{% comment %}
+  Bare page shell for the temporary pages: no site header, logo, navigation,
+  or account links. Only the stylesheet and the content block.
+{% endcomment %}
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Temporary page{% endblock %}</title>
+  <link href="{% static 'css_output/output.css' %}" rel="stylesheet">
+</head>
+<body class="bg-bg text-fg">
+  {% block content %}{% endblock %}
+</body>
+</html>

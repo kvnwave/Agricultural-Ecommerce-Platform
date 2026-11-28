@@ -22,9 +22,6 @@
 <body class="bg-bg text-fg">
   <header class="border-b border-fg/10">
     <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3" aria-label="Main">
-      <a href="{% url 'listings' %}" class="text-sm font-semibold text-fg">
-        AgriMarket
-      </a>
       <div class="flex flex-wrap items-center gap-4 text-sm text-fg/70">
         <a href="{% url 'listings' %}" class="hover:text-fg">Browse</a>
         {% if user.is_authenticated %}
