@@ -79,6 +79,14 @@ Open `http://127.0.0.1:8000/`. Admin is at `/control-panel/` by default; change 
 
 Build CSS once without watching: `npm run build`.
 
+### Development auto-login
+
+With `DEBUG=True`, anonymous visitors are signed in automatically as a local
+`dev@example.com` account (farmer + staff, created on first use, unusable
+password), so the login-protected pages can be reviewed without registering.
+The middleware does nothing when `DEBUG=False`, so deployment still requires
+allauth login.
+
 Authentication pages render under `/accounts/` (for example,
 `/accounts/login/`). Marketplace routes return
 `TemplateDoesNotExist` until the frontend templates are restored; the required
