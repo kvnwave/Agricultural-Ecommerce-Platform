@@ -11,7 +11,7 @@ templates remain in git history (see [Old templates for reference](#old-template
 
 ## Current state
 
-- Marketplace templates were removed. `listings/`, `chat/`, `analytics/`, and
+- Marketplace templates were removed. `listings/`, `chat/`, and
   `notifications/` template paths are empty, and the `listings/` partials
   (`_listing_card.html`, `_like_button.html`) and `partials/pagination.html`
   were removed with them.
@@ -129,7 +129,6 @@ it once into `{% with %}` when a page needs both the emptiness check and URL.
 | `/accounts/username/` | `username_change` | GET, POST | Signed in | `accounts/username_change.html` |
 | `/accounts/social/<provider>/start/<role>/` | `social_signup_start` | GET | Public | Redirects to the provider |
 | `/chat/` | `chat` | GET | Signed in | `chat/chat.html` |
-| `/analytics/` | `analytics` | GET | Signed in | `analytics/analytics.html` |
 | `/notifications/` | `notifications` | GET | Signed in | `notifications/notifications.html` |
 | `/control-panel/` | `admin:index` | GET | Staff | Django admin (path configurable with `DJANGO_ADMIN_PATH`) |
 
@@ -544,17 +543,15 @@ Use this link when the visitor must choose a role before Google signup:
 </a>
 ```
 
-### Placeholder pages — `/chat/`, `/analytics/`, `/notifications/`
+### Placeholder pages — `/chat/`, `/notifications/`
 
-- Views: `chat.views.chat_view`, `analytics.views.analytics_view`,
-  `notifications.views.notifications_view`
-- URL names: `chat`, `analytics`, `notifications`
+- Views: `chat.views.chat_view`, `notifications.views.notifications_view`
+- URL names: `chat`, `notifications`
 - Methods: `GET` only
 - Access: signed in. Anonymous requests redirect to
   `/accounts/login/?next=<original path>`.
 - Context: none
-- Templates: `chat/chat.html`, `analytics/analytics.html`,
-  `notifications/notifications.html`
+- Templates: `chat/chat.html`, `notifications/notifications.html`
 
 These are static placeholder pages with no models or logic yet. They are
 already gated behind `@login_required` so adding real data later cannot expose
@@ -632,7 +629,6 @@ the installed allauth package, so they load the project stylesheet through
 | `accounts/accounts.html` | `profile_view` | Yes | Yes |
 | `accounts/username_change.html` | `username_change` | Yes | Yes |
 | `chat/chat.html` | `chat_view` | Yes | No |
-| `analytics/analytics.html` | `analytics_view` | Yes | No |
 | `notifications/notifications.html` | `notifications_view` | Yes | No |
 | `account/base_entrance.html`, `account/base_manage.html` | allauth account pages | Yes | Yes |
 | `socialaccount/base_entrance.html`, `socialaccount/base_manage.html` | allauth social pages | Yes | Yes |

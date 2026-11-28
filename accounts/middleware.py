@@ -1,7 +1,7 @@
 """Development-only middleware.
 
 Debug builds sign anonymous visitors in as a local developer account so the
-protected pages (dashboard, create listing, profile, chat, analytics,
+protected pages (dashboard, create listing, profile, chat,
 notifications) can be reviewed without registering. The guard is
 ``settings.DEBUG``: with ``DEBUG=False`` this middleware does nothing and
 allauth's login requirement applies exactly as it does in deployment.

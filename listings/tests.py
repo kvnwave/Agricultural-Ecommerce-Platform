@@ -1255,10 +1255,15 @@ class ListingBrowseTests(TestCase):
         data.update(overrides)
         return Listing.objects.create(**data)
 
-    def test_root_redirects_to_listings(self):
+    def test_root_serves_temporary_menu(self):
         response = self.client.get("/")
 
-        self.assertRedirects(response, reverse("listings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "home.html")
+        self.assertContains(
+            response,
+            'href="{}"'.format(reverse("listings")),
+        )
 
     def test_browse_shows_only_public_statuses(self):
         response = self.client.get(reverse("listings"))

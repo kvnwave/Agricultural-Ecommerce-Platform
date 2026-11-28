@@ -19,9 +19,8 @@ A Django marketplace for agricultural products. Farmers post produce listings. B
 | Marketplace frontend templates | Removed for handoff |
 | Buyer/farmer chat | Planned |
 | Notifications (email, SMS) | Planned |
-| Analytics | Planned |
 
-`chat`, `analytics`, and `notifications` are placeholder apps for now. Their
+`chat` and `notifications` are placeholder apps for now. Their
 views still exist, but their templates were removed with the rest of the
 marketplace frontend.
 
@@ -165,7 +164,6 @@ config/          Settings, URLs, storage helper
 accounts/        Custom user, profile, signup
 listings/        Categories, listings, images, likes
 chat/            Placeholder view
-analytics/       Placeholder view
 notifications/   Placeholder view
 docs/            Frontend handoff instructions
 templates/       Base shell, auth pages, and the profile pages
