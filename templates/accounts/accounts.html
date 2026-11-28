@@ -15,47 +15,51 @@
     `get_role_display`, `user.profile.phone`, `user.profile.location`,
     `user.profile.email_notifications`, and `user.profile.sms_notifications`.
   {% endcomment %}
-  <div class="mx-auto max-w-3xl px-4 py-8">
+  <main class="mx-auto max-w-6xl px-4 py-8">
     <div class="flex items-center gap-4">
       {% include 'partials/avatar.html' with avatar_user=user %}
       <div>
-        <h1 class="text-h3 text-fg">{{ user.get_full_name|default:user.email }}</h1>
-        <p class="text-fg/60">{{ user.email }}</p>
-        <p class="text-fg/60">
+        <h1 class="text-h3 font-semibold text-ink">{{ user.get_full_name|default:user.email }}</h1>
+        <p class="text-sm text-mute">{{ user.email }}</p>
+        <p class="text-sm text-mute">
           @{{ user.username }}
           ·
-          <a href="{% url 'username_change' %}" class="underline">Change username</a>
+          <a href="{% url 'username_change' %}" class="text-leaf-deep underline hover:text-leaf">Change username</a>
         </p>
         {% if cooldown_ends %}
-          <p class="text-xs text-fg/60">
+          <p class="text-xs text-mute">
             Next change: {{ cooldown_ends|date:"M j, Y" }}
           </p>
         {% endif %}
-        <p class="text-fg/60">{{ user.profile.get_role_display }}</p>
+        <p class="text-sm text-mute">{{ user.profile.get_role_display }}</p>
       </div>
     </div>
 
-    <form method="post" enctype="multipart/form-data" class="mt-8">
-      {% csrf_token %}
-      <label for="{{ form.avatar.id_for_label }}" class="block text-sm font-medium text-fg">
-        Profile photo
-      </label>
-      {% with avatar_url=user.profile.avatar_url %}
-        {% if user.profile.avatar %}
-          <p class="mt-1 text-xs text-fg/60">Uploading a new photo replaces your current one.</p>
-        {% elif avatar_url %}
-          <p class="mt-1 text-xs text-fg/60">Your Google photo is used until you upload one.</p>
-        {% else %}
-          <p class="mt-1 text-xs text-fg/60">Add a photo so buyers and farmers can recognize you.</p>
-        {% endif %}
-      {% endwith %}
-      {{ form.avatar }}
-      {% for error in form.avatar.errors %}
-        <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-      {% endfor %}
-      <button type="submit" class="mt-4 rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
-        Save photo
-      </button>
-    </form>
-  </div>
+    <section class="mt-8 max-w-xl rounded-2xl border border-mist bg-paper p-6 shadow-sm">
+      <form method="post" enctype="multipart/form-data" class="space-y-4">
+        {% csrf_token %}
+        <div>
+          <label for="{{ form.avatar.id_for_label }}" class="mb-1.5 block text-sm font-medium text-ink">
+            Profile photo
+          </label>
+          {% with avatar_url=user.profile.avatar_url %}
+            {% if user.profile.avatar %}
+              <p class="mt-1 text-xs text-mute">Uploading a new photo replaces your current one.</p>
+            {% elif avatar_url %}
+              <p class="mt-1 text-xs text-mute">Your Google photo is used until you upload one.</p>
+            {% else %}
+              <p class="mt-1 text-xs text-mute">Add a photo so buyers and farmers can recognize you.</p>
+            {% endif %}
+          {% endwith %}
+          {{ form.avatar }}
+          {% for error in form.avatar.errors %}
+            <p class="mt-1.5 text-sm text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+        <button type="submit" class="rounded-xl bg-leaf px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
+          Save photo
+        </button>
+      </form>
+    </section>
+  </main>
 {% endblock %}

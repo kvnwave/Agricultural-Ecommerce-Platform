@@ -4,7 +4,7 @@
 
 {% block content %}
   <main class="mx-auto max-w-6xl px-4 py-8">
-    <a href="{% url 'listings' %}" class="text-sm text-fg/60 underline">← Back to listings</a>
+    <a href="{% url 'listings' %}" class="text-sm text-leaf-deep underline hover:text-leaf">← Back to listings</a>
 
     <div class="mt-6 grid gap-8 lg:grid-cols-2">
       <section aria-label="Listing photos">
@@ -13,10 +13,10 @@
             <img
               src="{{ cover.image.url }}"
               alt="{{ cover.alt_text|default:listing.title }}"
-              class="h-96 w-full rounded object-cover"
+              class="h-96 w-full rounded-xl border border-mist object-cover"
             >
           {% else %}
-            <div class="flex h-96 items-center justify-center rounded bg-fg/5 text-sm text-fg/50">
+            <div class="flex h-96 items-center justify-center rounded-xl border border-mist bg-mist text-sm text-mute">
               No photo yet
             </div>
           {% endif %}
@@ -29,7 +29,7 @@
                 <img
                   src="{{ image.image.url }}"
                   alt="{{ image.alt_text|default:listing.title }}"
-                  class="h-20 w-20 rounded object-cover"
+                  class="h-20 w-20 rounded-xl border border-mist object-cover"
                 >
               </li>
             {% endfor %}
@@ -37,23 +37,23 @@
         {% endif %}
       </section>
 
-      <section>
+      <section class="rounded-2xl border border-mist bg-paper p-5 shadow-sm">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 class="text-h3 text-fg">{{ listing.title }}</h1>
-            <p class="mt-1 text-sm text-fg/60">
+            <h1 class="text-h3 font-semibold text-ink">{{ listing.title }}</h1>
+            <p class="mt-1 text-sm text-mute">
               {{ listing.category.name }} · {{ listing.get_condition_display }}
             </p>
           </div>
 
           {% if listing.status == 'sold_out' %}
-            <span class="rounded bg-red-500/10 px-3 py-1 text-sm font-medium text-red-500">
+            <span class="rounded-full bg-mist px-2.5 py-0.5 text-xs font-medium text-ink">
               Sold out
             </span>
           {% endif %}
         </div>
 
-        <p class="mt-5 text-h4 font-medium text-fg">
+        <p class="mt-5 text-h4 font-medium text-ink">
           {% if listing.is_free %}
             Free
           {% else %}
@@ -61,23 +61,23 @@
           {% endif %}
         </p>
 
-        <p class="mt-2 text-sm text-fg/70">
+        <p class="mt-2 text-sm text-ink/70">
           Stock {{ listing.stock_quantity|floatformat:"-2" }} {{ listing.get_unit_display }}
           {% if listing.bulk_order %}· Bulk orders welcome{% endif %}
         </p>
 
         {% if listing.status_note %}
-          <p class="mt-4 rounded border border-fg/20 px-3 py-2 text-sm text-fg/70">
+          <p class="mt-4 rounded-xl border border-mist bg-paper px-3 py-2 text-sm text-ink/70">
             {{ listing.status_note }}
           </p>
         {% endif %}
 
-        <div class="mt-6 text-fg/80">
+        <div class="mt-6 text-sm text-ink/80">
           {{ listing.description|linebreaks }}
         </div>
 
-        <h2 class="mt-6 text-h5 text-fg">Deal methods</h2>
-        <ul class="mt-2 space-y-1 text-sm text-fg/70">
+        <h2 class="mt-6 text-h5 font-semibold text-ink">Deal methods</h2>
+        <ul class="mt-2 space-y-1 text-sm text-ink/70">
           {% if listing.meetup %}
             <li>
               Meet-up{% if listing.meetup_location %}: {{ listing.meetup_location }}{% endif %}
@@ -95,7 +95,7 @@
           {% endif %}
         </ul>
 
-        <div class="mt-6 border-t border-fg/10 pt-4 text-sm text-fg/60">
+        <div class="mt-6 border-t border-mist pt-4 text-sm text-ink/70">
           <p>
             Seller:
             {{ listing.farmer.get_full_name|default:listing.farmer.username }}
@@ -106,7 +106,7 @@
                 {% include 'listings/_like_button.html' %}
               {% endif %}
             {% else %}
-              <a href="{% url 'account_login' %}?next={{ request.path|urlencode }}" class="text-fg/60 underline">
+              <a href="{% url 'account_login' %}?next={{ request.path|urlencode }}" class="text-leaf-deep underline hover:text-leaf">
                 Log in to save this listing
               </a>
             {% endif %}

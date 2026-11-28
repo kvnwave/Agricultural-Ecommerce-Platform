@@ -737,16 +737,23 @@ and a one-to-one `profile`. `Profile` has `role`, `phone`, `location`,
 - Tailwind CSS v4 through the npm CLI. Input: `assets/css/input.css`. Output:
   `static/css_output/output.css`, loaded by `base.html`.
 - `npm run watch` rebuilds on change; `npm run build` builds once.
-- Theme tokens: `bg` (`#000000`), `fg` (`#F6F8F9`), font `Inter`, and text
-  sizes `text-h1` through `text-h6`, `text-body`, `text-small`.
-- The listing form ("List an item" sheet) adds tokens: `leaf` (`#8DB355`),
-  `leaf-deep` (`#7C9B46`), `paper` (`#FFFFFF`), `ink` (`#1D1A1A`),
-  `mist` (`#E8EDF2`), and `mute` (`#8B8E91`). It renders as a light card on
-  the dark page background; the toggles, pills, and photo previews are styled
-  by component rules in `input.css` under the `#listing-form` scope. The CSP
-  report-only policy allows `connect-src` to Nominatim and Overpass for the
-  form's geocoding and nearby-markets lookups; keep those entries if the CSP
-  is enforced.
+- Theme tokens: `mist` (`#E8EDF2`) page background, `paper` (`#FFFFFF`)
+  cards, `ink` (`#1D1A1A`) text, `leaf` (`#8DB355`) and `leaf-deep`
+  (`#7C9B46`) primary actions, `mute` (`#8B8E91`) secondary text, font
+  `Inter`, and text sizes `text-h1` through `text-h6`, `text-body`,
+  `text-small`. The older `bg` (`#000000`) and `fg` (`#F6F8F9`) tokens are
+  still defined but no longer used by the templates.
+- The whole site is light-themed: `base.html` body is `bg-mist text-ink`,
+  the header is `bg-paper` with a `border-mist` bottom edge, nav CTAs are
+  leaf pills, cards are `rounded-2xl border border-mist bg-paper shadow-sm`,
+  inputs are `rounded-xl` with `border-mist` and a leaf focus ring, and
+  selects opt into the custom chevron with the `form-select` class
+  (`input.css`). The listing form ("List an item" sheet) uses the same
+  tokens; its toggles, pills, and photo previews are styled by component
+  rules in `input.css` under the `#listing-form` scope. The CSP report-only
+  policy allows `connect-src` to Nominatim and Overpass for the form's
+  geocoding and nearby-markets lookups; keep those entries if the CSP is
+  enforced.
 - Below 640px, `input.css` shrinks `h1`/`h2`, pads `body`, and pads
   `.container`. `.data-table` cells shrink below 768px.
 - Any class not already in `output.css` renders unstyled until you rebuild.

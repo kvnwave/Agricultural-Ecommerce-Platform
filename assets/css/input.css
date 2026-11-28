@@ -112,8 +112,11 @@
   display: block;
 }
 
-/* Themed selects: replace native chrome with the sheet's chevron */
-#listing-form select {
+/* Themed selects: replace native chrome with the sheet's chevron.
+   `#listing-form select` covers the listing form; other pages opt in
+   with the `form-select` class. */
+#listing-form select,
+.form-select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 2.75rem;
@@ -123,7 +126,8 @@
   background-size: 16px 16px;
 }
 
-#listing-form select option {
+#listing-form select option,
+.form-select option {
   background-color: var(--color-paper);
   color: var(--color-ink);
 }

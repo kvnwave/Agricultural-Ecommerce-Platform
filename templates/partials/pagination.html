@@ -6,21 +6,21 @@
   keeps the current filters and only replaces `page`.
 {% endcomment %}
 {% if page_obj.paginator.num_pages > 1 %}
-  <nav class="mt-8 flex items-center justify-between text-sm" aria-label="Listing pages">
+  <nav class="mt-8 flex flex-wrap items-center justify-center gap-2 text-sm" aria-label="Listing pages">
     {% if page_obj.has_previous %}
-      <a href="{% querystring page=page_obj.previous_page_number %}" class="underline">
+      <a href="{% querystring page=page_obj.previous_page_number %}" class="rounded-lg border border-mist bg-paper px-3 py-1.5 text-ink transition hover:bg-mist">
         Previous
       </a>
     {% else %}
       <span></span>
     {% endif %}
 
-    <span class="text-fg/60">
+    <span class="rounded-lg bg-leaf px-3 py-1.5 font-medium text-white">
       Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
     </span>
 
     {% if page_obj.has_next %}
-      <a href="{% querystring page=page_obj.next_page_number %}" class="underline">
+      <a href="{% querystring page=page_obj.next_page_number %}" class="rounded-lg border border-mist bg-paper px-3 py-1.5 text-ink transition hover:bg-mist">
         Next
       </a>
     {% else %}

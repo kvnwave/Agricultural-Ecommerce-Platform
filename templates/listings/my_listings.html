@@ -3,34 +3,34 @@
 {% block title %}Your listings{% endblock %}
 
 {% block content %}
-  <main class="mx-auto max-w-3xl px-4 py-8">
-    <div class="flex items-center justify-between gap-4">
-      <h1 class="text-h3 text-fg">Your listings</h1>
-      <a href="{% url 'listing_create' %}" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+  <main class="mx-auto max-w-6xl px-4 py-8">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <h1 class="text-h3 font-semibold text-ink">Your listings</h1>
+      <a href="{% url 'listing_create' %}" class="rounded-xl bg-leaf px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
         + Sell
       </a>
     </div>
 
     {% if listings %}
-      <ul class="mt-6 space-y-4">
+      <ul class="mt-6 grid gap-5 md:grid-cols-2">
         {% for listing in listings %}
-          <li class="rounded border border-fg/20 p-4">
-            <h2 class="text-h5 text-fg">{{ listing.title }}</h2>
-            <p class="text-sm text-fg/60">
+          <li class="rounded-2xl border border-mist bg-paper p-5 shadow-sm">
+            <h2 class="text-h5 font-semibold text-ink">{{ listing.title }}</h2>
+            <p class="mt-1 text-sm text-mute">
               {{ listing.category.name }} ·
               {{ listing.get_status_display }} ·
               {{ listing.likes_total }} likes ·
               Stock {{ listing.stock_quantity }} {{ listing.get_unit_display }}
             </p>
-            <p class="text-sm text-fg/60">{{ listing.description|truncatechars:160 }}</p>
+            <p class="mt-1 text-sm text-mute">{{ listing.description|truncatechars:160 }}</p>
             {% if listing.status_note %}
-              <p class="mt-2 rounded border border-fg/10 px-3 py-2 text-sm text-fg/70">
+              <p class="mt-2 rounded-xl border border-mist bg-mist/40 px-3 py-2 text-sm text-ink/80">
                 {{ listing.status_note }}
               </p>
             {% endif %}
             <div class="mt-3 flex gap-3 text-sm">
-              <a href="{% url 'listing_update' listing.public_id %}" class="underline">Edit</a>
-              <a href="{% url 'listing_delete' listing.public_id %}" class="underline">Delete</a>
+              <a href="{% url 'listing_update' listing.public_id %}" class="text-leaf-deep underline hover:text-leaf">Edit</a>
+              <a href="{% url 'listing_delete' listing.public_id %}" class="text-red-600 underline hover:text-red-700">Delete</a>
             </div>
           </li>
         {% endfor %}
@@ -38,7 +38,7 @@
 
       {% include 'partials/pagination.html' %}
     {% else %}
-      <p class="mt-6 text-fg/60">You have not posted any listings yet.</p>
+      <p class="mt-6 rounded-2xl border border-dashed border-mist bg-paper px-4 py-8 text-center text-sm text-mute">You have not posted any listings yet.</p>
     {% endif %}
   </main>
 {% endblock %}

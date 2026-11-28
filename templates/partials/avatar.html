@@ -15,14 +15,14 @@
       <img
         src="{{ avatar_url }}"
         alt="{{ avatar_user.get_full_name|default:avatar_user.email }}"
-        class="h-10 w-10 rounded-full object-cover"
+        class="h-10 w-10 rounded-full border border-mist object-cover"
         referrerpolicy="no-referrer"
       >
     {% else %}
       <span
         role="img"
         aria-label="Avatar for {{ avatar_user.get_full_name|default:avatar_user.email }}"
-        class="flex h-10 w-10 items-center justify-center rounded-full bg-fg/10 text-fg"
+        class="flex h-10 w-10 items-center justify-center rounded-full border border-mist bg-mist text-ink"
       >
         {{ avatar_user.get_full_name|default:avatar_user.email|first|upper }}
       </span>

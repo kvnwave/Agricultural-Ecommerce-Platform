@@ -12,39 +12,41 @@
 {% block head_title %}Sign In{% endblock %}
 
 {% block content %}
-  <main class="mx-auto max-w-md px-4 py-8">
-    <h1 class="text-h3 text-fg">Sign In</h1>
-    <p class="mt-2 text-fg/60">
-      Need an account?
-      <a href="{{ signup_url }}" class="underline">Sign up</a>.
-    </p>
+  <main class="mx-auto max-w-md px-4 py-10">
+    <div class="rounded-2xl border border-mist bg-paper p-6 shadow-sm">
+      <h1 class="text-h5 font-semibold text-ink">Sign In</h1>
+      <p class="mt-2 text-sm text-mute">
+        Need an account?
+        <a href="{{ signup_url }}" class="text-leaf-deep underline hover:text-leaf">Sign up</a>.
+      </p>
 
-    <form method="post" action="{% url 'account_login' %}" class="mt-6 space-y-4">
-      {% csrf_token %}
-      {{ redirect_field }}
-      {{ form.as_p }}
-      <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
-        Sign In
-      </button>
-    </form>
+      <form method="post" action="{% url 'account_login' %}" class="mt-6 space-y-4">
+        {% csrf_token %}
+        {{ redirect_field }}
+        {{ form.as_p }}
+        <button type="submit" class="rounded-xl bg-leaf px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
+          Sign In
+        </button>
+      </form>
 
-    {% get_providers as socialaccount_providers %}
-    {% for provider in socialaccount_providers %}
-      {% if provider.id == "google" %}
-        <section class="mt-8 border-t border-fg/10 pt-6">
-          <h2 class="text-h5 text-fg">Continue with Google</h2>
-          <p class="mt-1 text-sm text-fg/60">
-            Use your Google account instead of a password.
-          </p>
-          {% provider_login_url "google" process="login" as google_login_url %}
-          <a
-            href="{{ google_login_url }}"
-            class="mt-3 inline-block rounded border border-fg/20 px-4 py-2 text-sm font-medium text-fg"
-          >
-            Sign in with Google
-          </a>
-        </section>
-      {% endif %}
-    {% endfor %}
+      {% get_providers as socialaccount_providers %}
+      {% for provider in socialaccount_providers %}
+        {% if provider.id == "google" %}
+          <section class="mt-8 border-t border-mist pt-6">
+            <h2 class="text-sm font-semibold text-ink">Continue with Google</h2>
+            <p class="mt-1 text-sm text-mute">
+              Use your Google account instead of a password.
+            </p>
+            {% provider_login_url "google" process="login" as google_login_url %}
+            <a
+              href="{{ google_login_url }}"
+              class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-mist bg-paper px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-mist"
+            >
+              Sign in with Google
+            </a>
+          </section>
+        {% endif %}
+      {% endfor %}
+    </div>
   </main>
 {% endblock %}

@@ -5,34 +5,34 @@
 {% block content %}
   <main class="mx-auto max-w-6xl px-4 py-8">
     <div class="flex flex-wrap items-center justify-between gap-4">
-      <h1 class="text-h3 text-fg">Browse produce</h1>
+      <h1 class="text-h3 font-semibold text-ink">Browse produce</h1>
       <div class="flex items-center gap-4 text-sm">
         {% if user.is_authenticated %}
-          <a href="{% url 'liked_listings' %}" class="text-fg/60 underline">
+          <a href="{% url 'liked_listings' %}" class="text-leaf-deep underline hover:text-leaf">
             Saved listings
           </a>
         {% endif %}
-        <a href="{% url 'my_listings' %}" class="text-fg/60 underline">
+        <a href="{% url 'my_listings' %}" class="text-leaf-deep underline hover:text-leaf">
           Sell produce
         </a>
       </div>
     </div>
 
-    <form method="get" class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <label class="text-sm text-fg">
+    <form method="get" class="mt-6 grid gap-4 rounded-2xl border border-mist bg-paper p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+      <label class="mb-1.5 block text-sm font-medium text-ink">
         Search
         <input
           type="search"
           name="q"
           value="{{ query }}"
           placeholder="Produce, description, or farmer"
-          class="mt-1 w-full rounded border border-fg/20 px-3 py-2"
+          class="mt-1.5 w-full rounded-xl border border-mist bg-paper px-3.5 py-2.5 text-sm font-normal text-ink placeholder:text-mute focus:border-leaf focus:outline-none focus:ring-2 focus:ring-leaf/40"
         >
       </label>
 
-      <label class="text-sm text-fg">
+      <label class="mb-1.5 block text-sm font-medium text-ink">
         Category
-        <select name="category" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+        <select name="category" class="form-select mt-1.5 w-full rounded-xl border border-mist bg-paper px-3.5 py-2.5 text-sm font-normal text-ink focus:border-leaf focus:outline-none focus:ring-2 focus:ring-leaf/40">
           <option value="">All categories</option>
           {% for category in categories %}
             <option value="{{ category.slug }}" {% if category.slug == selected_category %}selected{% endif %}>
@@ -42,9 +42,9 @@
         </select>
       </label>
 
-      <label class="text-sm text-fg">
+      <label class="mb-1.5 block text-sm font-medium text-ink">
         Condition
-        <select name="condition" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+        <select name="condition" class="form-select mt-1.5 w-full rounded-xl border border-mist bg-paper px-3.5 py-2.5 text-sm font-normal text-ink focus:border-leaf focus:outline-none focus:ring-2 focus:ring-leaf/40">
           <option value="">Any condition</option>
           {% for value, label in conditions %}
             <option value="{{ value }}" {% if value == selected_condition %}selected{% endif %}>
@@ -54,9 +54,9 @@
         </select>
       </label>
 
-      <label class="text-sm text-fg">
+      <label class="mb-1.5 block text-sm font-medium text-ink">
         Price
-        <select name="pricing" class="mt-1 w-full rounded border border-fg/20 px-3 py-2">
+        <select name="pricing" class="form-select mt-1.5 w-full rounded-xl border border-mist bg-paper px-3.5 py-2.5 text-sm font-normal text-ink focus:border-leaf focus:outline-none focus:ring-2 focus:ring-leaf/40">
           <option value="">Free and paid</option>
           {% for value, label in pricing_options %}
             <option value="{{ value }}" {% if value == selected_pricing %}selected{% endif %}>
@@ -67,10 +67,10 @@
       </label>
 
       <div class="flex items-end gap-3 sm:col-span-2 lg:col-span-4">
-        <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+        <button type="submit" class="rounded-xl bg-leaf px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
           Filter listings
         </button>
-        <a href="{% url 'listings' %}" class="text-sm text-fg/60 underline">
+        <a href="{% url 'listings' %}" class="text-sm text-leaf-deep underline hover:text-leaf">
           Clear filters
         </a>
       </div>
@@ -85,7 +85,7 @@
 
       {% include 'partials/pagination.html' %}
     {% else %}
-      <p class="mt-8 text-fg/60">
+      <p class="mt-8 rounded-2xl border border-dashed border-mist bg-paper px-4 py-8 text-center text-sm text-mute">
         No listings match these filters yet.
       </p>
     {% endif %}

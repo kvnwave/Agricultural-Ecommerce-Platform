@@ -11,29 +11,29 @@
     Staff skip the cooldown, so `cooldown_ends` is None for them.
   {% endcomment %}
   <main class="mx-auto max-w-md px-4 py-8">
-    <h1 class="text-h3 text-fg">Change username</h1>
-    <p class="mt-2 text-fg/60">
+    <h1 class="text-h3 font-semibold text-ink">Change username</h1>
+    <p class="mt-2 text-sm text-mute">
       Current username:
-      <span class="font-medium text-fg">{{ user.username }}</span>
+      <span class="font-medium text-ink">{{ user.username }}</span>
     </p>
 
     {% if cooldown_ends %}
-      <p class="mt-6 rounded border border-fg/20 p-4 text-sm text-fg/70">
+      <p class="mt-6 rounded-2xl border border-mist bg-paper p-4 text-sm text-mute shadow-sm">
         You can change your username again on
         <strong>{{ cooldown_ends|date:"M j, Y" }}</strong>.
       </p>
     {% else %}
-      <form method="post" class="mt-6 space-y-4">
+      <form method="post" class="mt-6 space-y-4 rounded-2xl border border-mist bg-paper p-6 shadow-sm">
         {% csrf_token %}
         {{ form.as_p }}
-        <button type="submit" class="rounded bg-fg px-4 py-2 text-sm font-medium text-bg">
+        <button type="submit" class="rounded-xl bg-leaf px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-leaf-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf">
           Save username
         </button>
       </form>
     {% endif %}
 
     <p class="mt-6 text-sm">
-      <a href="{% url 'profile' %}" class="text-fg/60 underline">Back to profile</a>
+      <a href="{% url 'profile' %}" class="text-leaf-deep underline hover:text-leaf">Back to profile</a>
     </p>
   </main>
 {% endblock %}

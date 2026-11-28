@@ -4,38 +4,38 @@
 
 {% block content %}
   <main class="mx-auto max-w-6xl px-4 py-8">
-    <h1 class="text-h5 text-fg">Temporary menu</h1>
-    <p class="mt-2 text-sm text-fg/60">
+    <h1 class="text-h5 font-semibold text-ink">Temporary menu</h1>
+    <p class="mt-2 text-sm text-mute">
       Plain links to the pages that exist so far. This page is not part of the
       final design.
     </p>
 
     <section class="mt-8">
-      <h2 class="text-h5 text-fg">Marketplace</h2>
-      <ul class="mt-2 space-y-2 text-sm text-fg/70">
-        <li><a class="underline" href="{% url 'listings' %}">Browse listings</a></li>
-        <li><a class="underline" href="{% url 'liked_listings' %}">Saved listings</a></li>
-        <li><a class="underline" href="{% url 'my_listings' %}">My listings</a></li>
-        <li><a class="underline" href="{% url 'listing_create' %}">Sell produce</a></li>
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-mute">Marketplace</h2>
+      <ul class="mt-2 space-y-2 text-sm">
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'listings' %}">Browse listings</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'liked_listings' %}">Saved listings</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'my_listings' %}">My listings</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'listing_create' %}">Sell produce</a></li>
       </ul>
     </section>
 
     <section class="mt-8">
-      <h2 class="text-h5 text-fg">Account</h2>
-      <ul class="mt-2 space-y-2 text-sm text-fg/70">
-        <li><a class="underline" href="{% url 'profile' %}">Profile</a></li>
-        <li><a class="underline" href="{% url 'username_change' %}">Change username</a></li>
-        <li><a class="underline" href="{% url 'account_login' %}">Log in</a></li>
-        <li><a class="underline" href="{% url 'account_signup' %}">Sign up</a></li>
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-mute">Account</h2>
+      <ul class="mt-2 space-y-2 text-sm">
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'profile' %}">Profile</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'username_change' %}">Change username</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'account_login' %}">Log in</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'account_signup' %}">Sign up</a></li>
       </ul>
     </section>
 
     <section class="mt-8">
-      <h2 class="text-h5 text-fg">Other pages</h2>
-      <ul class="mt-2 space-y-2 text-sm text-fg/70">
-        <li><a class="underline" href="{% url 'chat' %}">Chat</a></li>
-        <li><a class="underline" href="{% url 'notifications' %}">Notifications</a></li>
-        <li><a class="underline" href="{% url 'admin:index' %}">Admin panel</a></li>
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-mute">Other pages</h2>
+      <ul class="mt-2 space-y-2 text-sm">
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'chat' %}">Chat</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'notifications' %}">Notifications</a></li>
+        <li><a class="text-leaf-deep underline hover:text-leaf" href="{% url 'admin:index' %}">Admin panel</a></li>
       </ul>
     </section>
   </main>

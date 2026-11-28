@@ -10,9 +10,9 @@
   <button
     type="submit"
     aria-pressed="{{ is_liked|yesno:'true,false' }}"
-    class="rounded border border-fg/20 px-3 py-2 text-sm text-fg"
+    class="inline-flex items-center gap-2 rounded-full border border-leaf/60 bg-paper px-4 py-1.5 text-sm font-medium text-ink transition hover:bg-leaf/10"
   >
     {% if is_liked %}♥ Saved{% else %}♡ Save{% endif %}
-    <span class="text-fg/60">{{ listing.likes_total }}</span>
+    <span class="text-mute">{{ listing.likes_total }}</span>
   </button>
 </form>

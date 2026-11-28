@@ -5,8 +5,8 @@
 {% block content %}
   <main class="mx-auto max-w-6xl px-4 py-8">
     <div class="flex flex-wrap items-center justify-between gap-4">
-      <h1 class="text-h3 text-fg">Saved listings</h1>
-      <a href="{% url 'listings' %}" class="text-sm text-fg/60 underline">
+      <h1 class="text-h3 font-semibold text-ink">Saved listings</h1>
+      <a href="{% url 'listings' %}" class="text-sm text-leaf-deep underline hover:text-leaf">
         Browse produce
       </a>
     </div>
@@ -20,7 +20,7 @@
 
       {% include 'partials/pagination.html' %}
     {% else %}
-      <p class="mt-8 text-fg/60">
+      <p class="mt-8 rounded-2xl border border-dashed border-mist bg-paper px-4 py-8 text-center text-sm text-mute">
         You have not saved any listings yet.
       </p>
     {% endif %}

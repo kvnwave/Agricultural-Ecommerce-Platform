@@ -6,7 +6,16 @@
   In this project that means Google appears after both `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET` are set. `user` stays anonymous until the provider
   callback completes.
+
+  The wrapper below is the default content; pages that override `content`
+  (social signup, login cancelled, authentication error) render their own
+  narrow card inside it.
 {% endcomment %}
 
 {% block title %}{% block head_title %}{% endblock head_title %}{% endblock title %}
-{% block content %}{% endblock content %}
+{% block content %}
+  <main class="mx-auto max-w-md px-4 py-10">
+    <div class="rounded-2xl border border-mist bg-paper p-6 shadow-sm">
+    </div>
+  </main>
+{% endblock content %}

@@ -1,4 +1,4 @@
-<li class="overflow-hidden rounded border border-fg/20">
+<li class="overflow-hidden rounded-2xl border border-mist bg-paper shadow-sm">
   <a href="{% url 'listing_detail' listing.public_id %}" class="block">
     {% with cover=listing.cover_image %}
       {% if cover %}
@@ -8,7 +8,7 @@
           class="h-48 w-full object-cover"
         >
       {% else %}
-        <div class="flex h-48 items-center justify-center bg-fg/5 text-sm text-fg/50">
+        <div class="flex h-48 items-center justify-center bg-mist text-sm text-mute">
           No photo yet
         </div>
       {% endif %}
@@ -17,21 +17,21 @@
 
   <div class="space-y-2 p-4">
     <div class="flex items-start justify-between gap-3">
-      <h2 class="text-h5 text-fg">
+      <h2 class="text-h5 font-semibold text-ink">
         <a href="{% url 'listing_detail' listing.public_id %}">{{ listing.title }}</a>
       </h2>
       {% if listing.status == 'sold_out' %}
-        <span class="rounded bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
+        <span class="rounded-full bg-mist px-2.5 py-0.5 text-xs font-medium text-ink">
           Sold out
         </span>
       {% endif %}
     </div>
 
-    <p class="text-sm text-fg/60">
+    <p class="text-sm text-mute">
       {{ listing.category.name }} · {{ listing.get_condition_display }}
     </p>
 
-    <p class="text-lg font-medium text-fg">
+    <p class="text-lg font-medium text-ink">
       {% if listing.is_free %}
         Free
       {% else %}
@@ -39,16 +39,16 @@
       {% endif %}
     </p>
 
-    <p class="text-sm text-fg/60">
+    <p class="text-sm text-mute">
       Stock {{ listing.stock_quantity|floatformat:"-2" }} {{ listing.get_unit_display }}
       {% if listing.bulk_order %}· Bulk orders welcome{% endif %}
     </p>
 
     {% if listing.status == 'sold_out' and listing.status_note %}
-      <p class="text-sm text-fg/70">{{ listing.status_note }}</p>
+      <p class="text-sm text-ink/70">{{ listing.status_note }}</p>
     {% endif %}
 
-    <p class="text-xs text-fg/50">
+    <p class="text-xs text-mute">
       {{ listing.likes_total }} likes ·
       {{ listing.farmer.get_full_name|default:listing.farmer.username }}
     </p>

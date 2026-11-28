@@ -5,7 +5,15 @@
   allauth provides `form`, `redirect_field`, and the `login_url` / `signup_url`
   links between the two pages. `user` exists here but is normally anonymous
   until authentication succeeds, so guard any profile access.
+
+  The wrapper below is the default content; pages that override `content`
+  (login, signup, password reset) render their own narrow card inside it.
 {% endcomment %}
 
 {% block title %}{% block head_title %}{% endblock head_title %}{% endblock title %}
-{% block content %}{% endblock content %}
+{% block content %}
+  <main class="mx-auto max-w-md px-4 py-10">
+    <div class="rounded-2xl border border-mist bg-paper p-6 shadow-sm">
+    </div>
+  </main>
+{% endblock content %}
